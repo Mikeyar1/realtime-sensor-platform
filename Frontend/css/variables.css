@@ -1,0 +1,116 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600;700&family=Source+Code+Pro:wght@400;500&display=swap');
+
+:root {
+  /* ── Surface / Background ── */
+  --bg-root: #F0F2F5;
+  --bg-surface: #FFFFFF;
+  --bg-panel: #FFFFFF;
+  --bg-sidebar: #1B2A4A;
+  --bg-topbar: #FFFFFF;
+  --bg-input: #F5F6F8;
+  --bg-hover: #E8EBF0;
+  --bg-timeline: #FFFFFF;
+
+  /* ── Sidebar-specific (dark sidebar, light main) ── */
+  --sidebar-text: #C5CDDB;
+  --sidebar-text-dim: #7B8AA3;
+  --sidebar-hover: rgba(255, 255, 255, 0.06);
+  --sidebar-active-bg: rgba(255, 255, 255, 0.10);
+  --sidebar-active-text: #FFFFFF;
+  --sidebar-divider: rgba(255, 255, 255, 0.08);
+
+  /* ── Borders ── */
+  --border-subtle: #E2E5EA;
+  --border-medium: #CDD1D9;
+  --border-active: #3D6ECC;
+
+  /* ── Text ── */
+  --text-primary: #1A2138;
+  --text-secondary: #4A5468;
+  --text-muted: #7B8499;
+  --text-dim: #A0A8B8;
+
+  /* ── Accent Colors ── */
+  --accent-blue: #3D6ECC;
+  --accent-cyan: #2B9EB3;
+  --accent-green: #2D8E54;
+  --accent-red: #C94444;
+  --accent-orange: #C47A2A;
+  --accent-yellow: #A89026;
+  --accent-purple: #6B5DB8;
+  --accent-teal: #2B8E7E;
+
+  /* ── Chart Trace Colors ── */
+  --trace-ecg: #2B8E7E;
+  --trace-pupil-l: #2D8E54;
+  --trace-pupil-r: #C47A2A;
+  --trace-hr: #C94444;
+  --trace-gaze: #6B5DB8;
+  --trace-accel-x: #3D6ECC;
+  --trace-accel-y: #A89026;
+  --trace-accel-z: #8B5DB8;
+  --trace-resp: #2B9EB3;
+  --trace-gsr: #C4942A;
+
+  /* ── Event Colors ── */
+  --event-shot: #3D6ECC;
+  --event-hit: #2D8E54;
+  --event-miss: #C94444;
+  --event-actor: #A89026;
+  --event-system: #7B8499;
+
+  /* ── Status ── */
+  --status-live: #C94444;
+  --status-replay: #3D6ECC;
+  --status-connected: #2D8E54;
+  --status-disconnected: #C94444;
+
+  /* ── Typography ── */
+  --font-family: 'Source Sans 3', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Source Code Pro', 'Consolas', monospace;
+  --font-size-xs: 0.8125rem;
+  /* 13px */
+  --font-size-sm: 0.875rem;
+  /* 14px */
+  --font-size-base: 0.9375rem;
+  /* 15px */
+  --font-size-md: 1rem;
+  /* 16px */
+  --font-size-lg: 1.125rem;
+  /* 18px */
+  --font-size-xl: 1.25rem;
+  /* 20px */
+  --font-size-2xl: 1.625rem;
+  /* 26px */
+  --font-size-3xl: 2.5rem;
+  /* 40px — gauge big number */
+
+  /* ── Spacing ── */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 24px;
+  --space-3xl: 32px;
+
+  /* ── Layout Dimensions ── */
+  --sidebar-width: 230px;
+  --topbar-height: 52px;
+  --timeline-height: 150px;
+  --panel-gap: 12px;
+  --panel-radius: 8px;
+
+  /* ── Shadows ── */
+  --shadow-panel: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-popup: 0 4px 16px rgba(0, 0, 0, 0.12);
+
+  /* ── Transitions ── */
+  --transition-fast: 120ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 350ms ease;
+
+  /* ── Chart Grid ── */
+  --chart-grid-color: rgba(0, 0, 0, 0.04);
+  --chart-axis-color: rgba(0, 0, 0, 0.08);
+}

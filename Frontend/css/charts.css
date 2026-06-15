@@ -1,0 +1,359 @@
+/* ============================================================
+   LabReplay — Chart Panel Styling
+   Each chart lives inside a .chart-panel container
+   ============================================================ */
+
+.chart-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--panel-radius);
+  display: flex;
+  flex-direction: column;
+  height: 300px;
+  max-height: 300px;
+  box-shadow: var(--shadow-panel);
+  transition: border-color var(--transition-fast);
+  overflow: hidden;
+}
+
+/* ── Chart Card header enhancements ── */
+.chart-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chart-card-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.chart-card-subtitle {
+  font-size: var(--font-size-xs);
+  color: var(--text-dim);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chart-card-badge {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 1px 6px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.chart-card-channel-select {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  padding: 2px 6px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.chart-card-channel-select:hover,
+.chart-card-channel-select:focus {
+  border-color: var(--accent-blue);
+}
+
+.chart-panel:hover {
+  border-color: var(--border-medium);
+}
+
+/* ── Panel Header ── */
+.chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-lg);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.chart-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chart-unit {
+  font-size: var(--font-size-xs);
+  color: var(--text-dim);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  margin-left: 6px;
+}
+
+.chart-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chart-action-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.chart-action-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* ── Panel Body (chart canvas area) ── */
+.chart-body {
+  flex: 1;
+  position: relative;   /* required for absolute-fill children */
+  padding: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Only apply 100% size to plain Chart.js canvases (not uPlot) */
+.chart-body > canvas:not(.uplot) {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ── Panel Legend ── */
+.chart-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-xs) var(--space-lg);
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.legend-item.disabled {
+  opacity: 0.35;
+}
+
+/* ── Gauge (HR numeric) ── */
+.gauge-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 4px;
+  padding: 8px;
+}
+
+.gauge-value {
+  font-family: var(--font-mono);
+  font-size: 3.5rem;
+  font-weight: 700;
+  line-height: 1;
+  transition: color 0.4s ease;
+}
+
+.gauge-unit-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.gauge-sparkline {
+  width: 100%;
+  max-width: 200px;
+  height: 48px;
+  margin-top: 4px;
+}
+
+/* ── uPlot dark theme overrides ── */
+.uplot .u-wrap {
+  width: 100% !important;
+}
+.uplot .u-legend {
+  display: none !important;
+}
+.uplot .u-series th {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.u-hz.u-cursor-x, .u-cursor-pt {
+  opacity: 0.6;
+}
+
+/* ── Event Log specific styles ── */
+.event-log-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.event-log-filter {
+  display: flex;
+  gap: var(--space-xs);
+  padding: var(--space-xs) 0;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.event-filter-tag {
+  font-size: var(--font-size-xs);
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border-medium);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--transition-fast);
+}
+
+.event-filter-tag.active {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.event-log-entries {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.event-log-entries::-webkit-scrollbar {
+  width: 3px;
+}
+.event-log-entries::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 2px;
+}
+
+.event-entry {
+  display: flex;
+  gap: var(--space-sm);
+  padding: 3px var(--space-xs);
+  border-radius: 3px;
+  font-size: var(--font-size-xs);
+  transition: background var(--transition-fast);
+}
+
+.event-entry:hover {
+  background: var(--bg-hover);
+}
+
+.event-time {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  flex-shrink: 0;
+  min-width: 60px;
+}
+
+.event-marker-tag {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  min-width: 48px;
+}
+
+.event-text {
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* ── Scatter-specific styles ── */
+.scatter-canvas {
+  background: var(--bg-input);
+  border-radius: 4px;
+}
+
+/* ── Chart annotation markers (VirTra events on charts) ── */
+.chart-annotation-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ── No-data placeholder (inside panels) ── */
+.chart-no-data {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-dim);
+  font-size: var(--font-size-sm);
+  font-style: italic;
+}
+
+/* ── Grid-level status messages (center of main area) ── */
+.chart-status-msg {
+  color: var(--text-dim);
+  font-size: var(--font-size-sm);
+  font-style: italic;
+  text-align: center;
+}
+
+.chart-status-msg .chart-no-data {
+  height: auto;
+}
+
+/* Pulsing dot shown during session loading */
+.grid-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  opacity: 0.7;
+}
+
+.grid-status-dot.loading-dot {
+  animation: dot-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { transform: scale(0.7); opacity: 0.4; }
+  50%       { transform: scale(1.2); opacity: 1.0; }
+}

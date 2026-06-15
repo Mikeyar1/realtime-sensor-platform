@@ -1,0 +1,28 @@
+sql_query_metadata = """
+                        SELECT lsl_metadata_id, datetime_utc, datetime_local, unix_timestamp_seconds, target_table_name, name, type, channels, sampling_rate_hz, source_id, channel_format, session_id, hostname, desc 
+                        FROM lsl_metadata
+                        WHERE datetime_utc BETWEEN ? AND ?
+                        ORDER BY datetime_utc ASC
+                    """ # add LIMIT 1 or another number to limit the results returned for development purposes
+sql_query_stream = """
+                        SELECT * FROM [target_table_name] 
+                        WHERE lsl_metadata_id = ?
+                        ORDER BY datetime_utc, lsl_timestamp ASC
+                    """
+sql_query_end_date_by_metadata_id = """
+                        SELECT max(datetime_utc) FROM [target_table_name]
+                        WHERE lsl_metadata_id IN [lsl_metadata_ids]
+                        ORDER BY datetime_utc, lsl_timestamp ASC
+                    """
+sqlite_database_file = ""
+mapped_values_start_index = 6
+unmapped_json_index = 6
+unmapped_table_contains_text = "unmapped"
+metadata_utc_datetime_column_index = 2
+sample_utc_datetime_column_index = 2
+
+start_date_days_delta_from_now = 90
+
+timeline_update_interval_seconds = 1.0
+
+publisher_thread_sleep_interval_seconds = 0.01

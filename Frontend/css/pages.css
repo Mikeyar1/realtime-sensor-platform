@@ -1,0 +1,22 @@
+/**
+ * css/pages.css — Page styles index.
+ *
+ * This file is intentionally thin. All rules live in the
+ * page-scoped files under css/pages/:
+ *
+ *   topbar.css      — shared topbar components (all pages)
+ *   live-monitor.css — Live Monitor layout + stream inspector
+ *   live-intel.css   — Live Performance Intelligence + BehDisc dashboard
+ *   replay.css       — Replay Sessions layout
+ *   workspace.css    — Human Performance Workspace layout
+ *
+ * Add new page styles by creating css/pages/<page-name>.css
+ * and adding an @import here.
+ */
+
+@import url("pages/topbar.css");
+@import url("pages/live-monitor.css");
+@import url("pages/live-intel.css");
+@import url("pages/replay.css");
+@import url("pages/workspace.css");
+@import url("pages/debrief.css?v=20260604");

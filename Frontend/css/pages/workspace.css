@@ -1,0 +1,23 @@
+/**
+ * css/pages/workspace.css — Human Performance Workspace page styles.
+ *
+ * Covers: .workspace-content scroll area and workspace-specific
+ * topbar spinner controls.
+ * Topbar elements (select, icon-btn) live in topbar.css.
+ */
+
+/* ══════════════════════════════════════════════════════════════
+   PERFORMANCE WORKSPACE — page layout
+   ══════════════════════════════════════════════════════════════ */
+
+.workspace-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+
+.workspace-content::-webkit-scrollbar { width: 6px; }
+.workspace-content::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 3px;
+}

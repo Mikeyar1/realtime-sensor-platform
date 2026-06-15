@@ -1,0 +1,229 @@
+/**
+ * css/pages/live-monitor.css — Live Monitor page styles.
+ *
+ * Covers: .live-monitor-content, .live-monitor-charts,
+ *         .live-monitor-idle, and the .stream-inspector panel.
+ */
+
+
+/* Main page content wrapper */
+.live-monitor-content {
+  flex: 1;
+  position: relative;
+  display: flex;
+  overflow: hidden;
+}
+
+/* Chart area fills available space */
+.live-monitor-charts {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+
+.live-monitor-charts::-webkit-scrollbar { width: 6px; }
+.live-monitor-charts::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 3px;
+}
+
+/* Idle/waiting state placeholder */
+.live-monitor-idle {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: var(--space-xl);
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.live-monitor-idle-icon {
+  font-size: 48px;
+  opacity: 0.2;
+  animation: idle-breathe 3s ease-in-out infinite;
+}
+
+@keyframes idle-breathe {
+  0%, 100% { opacity: 0.15; transform: scale(1); }
+  50%       { opacity: 0.30; transform: scale(1.04); }
+}
+
+.live-monitor-idle-title {
+  font-size: var(--font-size-lg, 1.125rem);
+  font-weight: 600;
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.live-monitor-idle-sub {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  opacity: 0.4;
+}
+
+/* ── Stream Inspector Panel ─────────────────────────────────── */
+
+.stream-inspector {
+  position: absolute;
+  top: var(--space-lg);
+  right: var(--space-lg);
+  width: 340px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.32);
+  z-index: 100;
+  overflow: hidden;
+  transform: translateX(calc(100% + var(--space-lg)));
+  opacity: 0;
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.18s ease;
+  pointer-events: none;
+}
+
+.stream-inspector.open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: all;
+}
+
+.stream-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-input);
+}
+
+.stream-inspector-title {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.stream-inspector-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.stream-inspector-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.stream-inspector-body {
+  overflow-y: auto;
+  max-height: 320px;
+}
+
+.stream-inspector-body::-webkit-scrollbar { width: 4px; }
+.stream-inspector-body::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 2px;
+}
+
+/* Stream Inspector table */
+.stream-inspector-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.stream-inspector-table th {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-input);
+  white-space: nowrap;
+}
+
+.stream-inspector-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.stream-inspector-table tr:last-child td {
+  border-bottom: none;
+}
+
+.stream-inspector-table tr:hover td {
+  background: var(--bg-hover);
+}
+
+.stream-inspector-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-inspector-type {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.stream-inspector-hz {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.stream-inspector-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--text-dim);
+  transition: background 0.3s;
+}
+
+.stream-inspector-status-dot.active { background: #10B981; }
+.stream-inspector-status-dot.silent { background: #F59E0B; }
+.stream-inspector-status-dot.lost   { background: #EF4444; }
+
+/* Toggle checkbox cell */
+.stream-inspector-toggle {
+  text-align: center;
+}
+
+.stream-inspector-toggle input[type="checkbox"] {
+  accent-color: var(--accent-blue);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+/* Empty state */
+.stream-inspector-empty {
+  padding: var(--space-xl) var(--space-lg);
+  text-align: center;
+  font-size: var(--font-size-xs);
+  color: var(--text-dim);
+  font-style: italic;
+}

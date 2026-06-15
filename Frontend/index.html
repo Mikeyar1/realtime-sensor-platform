@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LabReplay — Physiological Data Dashboard</title>
+  <meta name="description"
+    content="Real-time and replay visualization of physiological and behavioral data streams for research and training analysis." />
+
+  <!-- Design System -->
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+  <link rel="stylesheet" href="css/charts.css" />
+  <link rel="stylesheet" href="css/analysis.css" />
+  <link rel="stylesheet" href="css/pages.css?v=20260604" />
+
+  <!-- ES module preloads — shared utilities (imported by app.js) -->
+  <link rel="modulepreload" href="js/shared/constants.js" />
+  <link rel="modulepreload" href="js/shared/format.js" />
+  <link rel="modulepreload" href="js/shared/api.js" />
+  <link rel="modulepreload" href="js/analysis/drills/behdisc/aggregate-view.js" />
+  <link rel="modulepreload" href="js/analysis/drills/behdisc/per-engagement-view.js" />
+  <link rel="modulepreload" href="js/analysis/drills/behdisc/comparison-view.js" />
+
+  <!-- Plotly.js — interactive charts with dark theme & real-time streaming -->
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.35.2/plotly.min.js"></script>
+</head>
+
+<body>
+
+  <div id="app">
+
+    <header id="topbar-slot">
+      <!-- Populated by TopBarManager when a page activates -->
+    </header>
+
+    <div id="middle">
+
+      <!-- Sidebar -->
+      <aside id="sidebar">
+        <!-- Brand title -->
+        <div class="sidebar-brand">DNLC</div>
+
+        <!-- Navigation — grouped -->
+        <nav class="sidebar-nav">
+
+          <!-- LIVE group -->
+          <div class="sidebar-section-label">LIVE</div>
+
+          <div class="nav-item active" data-page="live-monitor" id="nav-live-monitor">
+            <span class="nav-dot"></span>
+            <span class="nav-label">Real-Time Monitoring</span>
+          </div>
+
+          <div class="nav-item" data-page="live-intel" id="nav-live-intel">
+            <span class="nav-dot"></span>
+            <span class="nav-label">Real-Time Human Performance</span>
+          </div>
+
+          <!-- POST-SESSION group -->
+          <div class="sidebar-section-label" style="margin-top: var(--space-lg)">POST-SESSION</div>
+
+          <div class="nav-item" data-page="replay" id="nav-replay">
+            <span class="nav-dot"></span>
+            <span class="nav-label">Replay Sessions</span>
+          </div>
+
+          <div class="nav-item" data-page="workspace" id="nav-workspace">
+            <span class="nav-dot"></span>
+            <span class="nav-label">Human Performance Workspace</span>
+          </div>
+
+          <div class="nav-item" data-page="debrief" id="nav-debrief">
+            <span class="nav-dot"></span>
+            <span class="nav-label">Performance Debrief</span>
+          </div>
+
+        </nav>
+
+        <div class="sidebar-divider"></div>
+
+        <!-- Dynamic stream list — context-dependent (shown by Live Monitor & Replay pages) -->
+        <div id="stream-groups" style="display:none">
+          <div class="stream-group">
+            <div class="stream-group-title">Streams</div>
+            <div class="stream-group-subtitle">Waiting for connection</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main id="main-content">
+
+        <div class="page active" id="page-live-monitor">
+          <!-- Populated by LiveMonitorPage -->
+        </div>
+
+        <div class="page" id="page-live-intel">
+          <!-- Populated by LiveIntelPage -->
+        </div>
+
+        <div class="page" id="page-replay">
+          <!-- Populated by ReplaySessionsPage -->
+        </div>
+
+        <div class="page" id="page-workspace">
+          <!-- Populated by PerformanceWorkspacePage -->
+        </div>
+
+        <div class="page" id="page-debrief">
+          <!-- Populated by DebriefPage -->
+        </div>
+
+      </main>
+    </div>
+
+    <footer id="event-bar">
+
+      <div id="event-bar-handle" title="Drag to resize"></div>
+
+      <span id="timeline-start" style="display:none">00:00:00</span>
+      <span id="timeline-end" style="display:none">00:00:00</span>
+      <div id="timeline-track" style="display:none">
+        <div class="timeline-rail"></div>
+        <div class="timeline-progress" id="timeline-progress"></div>
+        <div class="timeline-head" id="timeline-head"></div>
+      </div>
+
+      <!-- Two-column event panel -->
+      <div id="event-columns">
+
+        <!-- LEFT: VirTra event log -->
+        <div id="virtra-panel">
+          <div class="panel-header">
+            <span class="panel-header-title">VirTra Events</span>
+          </div>
+          <div id="event-feed">
+            <span class="ticker-empty">Waiting for events.</span>
+          </div>
+        </div>
+
+        <!-- RIGHT: Speech-to-text -->
+        <div id="speech-panel">
+          <div class="panel-header">
+            <span class="panel-header-title">Speech</span>
+          </div>
+          <div id="speech-box">
+            <span id="speech-text" class="speech-utterance">—</span>
+            <span id="speech-time" class="speech-ts"></span>
+          </div>
+        </div>
+
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Scripts: core → charts → analysis → pages -->
+
+  <!-- Core infrastructure -->
+  <script src="js/core/plugin-registry.js"></script>
+  <script src="js/core/event-bus.js"></script>
+  <script src="js/core/stream-router.js"></script>
+  <script src="js/core/mode-manager.js"></script>
+  <script src="js/core/sidebar.js"></script>
+  <script src="js/core/timeline.js"></script>
+  <script src="js/core/topbar-manager.js"></script>
+
+  <!-- Plugins -->
+  <script src="js/plugins/event-ticker.js"></script>
+
+  <!-- Chart system -->
+  <script src="js/charts/stream-registry.js"></script>
+  <script src="js/charts/chart-card.js"></script>
+  <script src="js/charts/chart-hr.js"></script>
+  <script src="js/charts/chart-pupil.js"></script>
+  <script src="js/charts/chart-gaze.js"></script>
+  <script src="js/charts/chart-hrv.js"></script>
+  <script src="js/charts/chart-motion.js"></script>
+  <script src="js/charts/chart-factory.js"></script>
+
+  <!-- Analysis components (shared between Workspace and Live Intel) -->
+  <script src="js/analysis/api-client.js"></script>
+  <script src="js/analysis/trial-sidebar.js"></script>
+  <script src="js/analysis/epoch-chart.js"></script>
+  <script src="js/analysis/stats-panel.js"></script>
+  <script src="js/analysis/drills/behdisc/comparison.js"></script>
+  <script src="js/analysis/analysis-app.js"></script>
+
+  <!-- Page controllers -->
+  <script src="js/pages/live-monitor.js"></script>
+  <script src="js/pages/replay-sessions.js"></script>
+  <script src="js/intel/behdisc-engine.js"></script>
+  <script src="js/intel/live-intel-ui.js"></script>
+  <script src="js/pages/live-intel.js"></script>
+  <script src="js/pages/workspace.js"></script>
+  <script src="js/pages/debrief.js"></script>
+
+  <!-- App bootstrap (must be last; type=module defers automatically) -->
+  <script type="module" src="js/app.js"></script>
+
+</body>
+
+</html>

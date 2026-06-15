@@ -1,0 +1,23 @@
+__pycache__
+/.venv
+/.vscode/**
+!/.vscode/settings.json
+/.coverage
+trash_*
+/CSV
+/build
+/dist
+dnlc.db
+dnlc.db-journal
+dnlc.db-shm
+dnlc.db-wal
+/*.db-shm
+/*.db-wal
+*.db-shm
+
+# Session databases — large binary data files, not for version control
+*.db
+sessions/
+
+# macOS
+.DS_Store

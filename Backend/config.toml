@@ -1,0 +1,16 @@
+[server]
+# 0.0.0.0 = accept WebSocket connections from any machine on the LAN.
+# Change to "localhost" to restrict to the local machine only.
+host = "0.0.0.0"
+port = 8500
+
+[lsl]
+# How often InletManager polls for new LSL streams on the network (seconds).
+discovery_interval_seconds = 1.0
+pull_timeout_seconds = 1.0
+
+[replay]
+# Drop recorded .db files into this folder — the dashboard will list them automatically
+db_scan_directory = "../total-recall/sessions"
+# Path to Total Recall's root directory (where lsl_replay_publisher.py lives)
+total_recall_directory = "../total-recall"

@@ -1,0 +1,81 @@
+[tool.poetry]
+name = "total-recall"
+version = "0.1.0"
+description = ""
+authors = ["Timothy Rodabaugh <timothy.rodabaugh@baesystems.us>"]
+readme = "readme.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+numpy = "^2.1.1"
+pylsl = "^1.17.6"
+pynput = "^1.7.7"
+tkcalendar = "^1.6.1"
+
+[tool.poetry-pyinstaller-plugin]
+
+#recursive-copy-metadata = [
+#    "pylsl"
+#]
+
+[tool.poetry-pyinstaller-plugin.collect]
+# Collect all submodules, data files & binaries for 'package_A' and 'package_B'
+all = ['pylsl']
+
+[tool.poetry-pyinstaller-plugin.scripts]
+#poetry self add poetry-pyinstaller-plugin
+total_recall = { source = "main.py", type = "onefile", bundle = true}
+
+[tool.poetry-pyinstaller-plugin.package]
+# 1-1 next to executable
+"config.toml" = "."
+
+
+[tool.ruff]
+line-length = 120
+show-fixes = true
+
+[tool.ruff.lint]
+extend-select = [
+    "I",     # isort
+    "N",     # naming conventions
+    "UP",    # pyupgrade -- catches obsolete code patterns
+    "ANN",   # type annotations
+    "ASYNC", # async code checks
+    "B",     # flake8-bugbear -- catches bug-prone usage
+    "C4",    # list comprehensions
+    "DTZ",   # datetime mistakes -- also please use pendulum instead of datetime
+    "INP",   # checks for presence of __init__.py
+    "TID",   # tidy imports
+    "PTH",   # use pathlib instead of os.path
+    "PLW",   # pylint warnings
+    "PLE",   # pylint errors
+]
+ignore = [
+    "E501",   # long lines after auto-formatting, such as long strings, are okay
+    "ANN002", # we don't demand a type on *args, particularly because it's difficult to specify
+    "ANN003", # we don't demand a type on **kwargs, particularly because it's difficult to specify
+    "ANN101", # self does not need a type
+    "ANN102", # `cls` in classmethod does not need a type
+    "ANN401", # Allow "typing.Any"
+    "UP007",  # using Optional[X] instead of X | None is okay for now
+    "N818",   # Don't require Exception class names to end with "Error"
+    "PTH123", # we don't need to construct a Path just to open a file by filename
+]
+
+[tool.mypy]
+strict = true
+show_error_codes = true
+no_strict_optional = true
+allow_any_generics = true  # allow ': dict' instead of ': dict[Any, Any]'
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.2"
+pytest-cov = "^5.0.0"
+ruff = "^0.6.1"
+mypy = "^1.11.1"
+pip-audit = "^2.7.3"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

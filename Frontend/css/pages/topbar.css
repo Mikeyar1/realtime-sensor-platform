@@ -1,0 +1,434 @@
+/**
+ * css/pages/topbar.css — Shared top-bar component styles.
+ *
+ * Used by all four page controllers.
+ * Covers: .topbar, .topbar-section, .topbar-sep, buttons, inputs,
+ *         transport controls, select, meta chips.
+ */
+
+/* ══════════════════════════════════════════════════════════════
+   SHARED TOPBAR LAYOUT (all pages)
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * Each page renders a .topbar div into #topbar-slot.
+ * Sections are flex items separated by .topbar-sep dividers.
+ */
+.topbar {
+  display: flex;
+  align-items: center;
+  height: var(--topbar-height, 52px);
+  padding: 0 var(--space-xl);
+  gap: var(--space-md);
+  background: var(--bg-topbar);
+  width: 100%;
+}
+
+.topbar-section {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.topbar-section--grow {
+  flex: 1;
+}
+
+.topbar-section--right {
+  margin-left: auto;
+}
+
+/* Thin vertical separator between sections */
+.topbar-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+
+/* Status label text next to the status dot */
+.topbar-status-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.topbar-status-label.live       { color: #10B981; }
+.topbar-status-label.detected   { color: #3B82F6; }
+.topbar-status-label.connecting { color: #F59E0B; }
+
+/* Page title chip */
+.topbar-page-title {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+/* Elapsed clock */
+.topbar-elapsed {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.topbar-elapsed-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.topbar-elapsed-value {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 72px;
+}
+
+/* Generic topbar input */
+.topbar-input {
+  font-family: var(--font-family);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-medium);
+  border-radius: 4px;
+  padding: 4px 10px;
+  transition: border-color var(--transition-fast);
+}
+
+.topbar-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+.topbar-input::placeholder {
+  color: var(--text-dim);
+}
+
+/* Topbar icon button */
+.topbar-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  font-family: var(--font-family);
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.topbar-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border-color: var(--border-medium);
+}
+
+.topbar-icon-btn.active {
+  background: rgba(61, 110, 204, 0.15);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+/* Primary action button (e.g. Start, Run) */
+.topbar-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--accent-blue);
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-family: var(--font-family);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.topbar-btn-primary:hover {
+  background: #3461B5;
+  transform: translateY(-1px);
+}
+
+.topbar-btn-primary:active {
+  transform: translateY(0);
+}
+
+/* Stop button (secondary/muted) */
+.topbar-btn-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-family: var(--font-family);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+}
+
+.topbar-btn-stop:hover {
+  border-color: var(--text-muted);
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* Transport controls (used in Replay Sessions top bar) */
+.topbar-transport {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.topbar-transport-btn {
+  background: var(--bg-input);
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 5px 10px;
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  line-height: 1;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.topbar-transport-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.topbar-transport-btn.play-pause {
+  min-width: 32px;
+  text-align: center;
+}
+
+.topbar-transport-btn.play-pause:hover {
+  background: var(--accent-blue);
+  color: #fff;
+}
+
+.topbar-transport-btn.stop-btn:hover {
+  background: #3D1E1E;
+  color: #F87171;
+}
+
+.topbar-transport-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Topbar select dropdown */
+.topbar-select {
+  font-family: var(--font-family);
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-medium);
+  border-radius: 4px;
+  padding: 4px 28px 4px 10px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237B8499'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  max-width: 260px;
+}
+
+.topbar-select:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+.topbar-select option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+/* SessionInfo context chips (participant / session name) */
+.topbar-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 100px;
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-meta-chip-icon {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+/* Session time display in topbar (Replay) */
+.topbar-session-time {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1;
+}
+
+.topbar-session-time-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.topbar-session-time-value {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+/* Spinner number input (Workspace BL/AN windows) */
+.topbar-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.topbar-spinner-label {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.topbar-spinner input[type="number"] {
+  width: 52px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-medium);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  padding: 4px 6px;
+  text-align: center;
+  transition: border-color var(--transition-fast);
+  -moz-appearance: textfield;
+}
+
+.topbar-spinner input[type="number"]::-webkit-inner-spin-button,
+.topbar-spinner input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+
+.topbar-spinner input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+/* Auto-stop spinner (Live Intel) */
+.topbar-autostop {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 3px 8px;
+}
+
+.topbar-autostop label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.topbar-autostop input[type="number"] {
+  width: 36px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-align: center;
+  padding: 0;
+  -moz-appearance: textfield;
+}
+
+.topbar-autostop input[type="number"]:focus {
+  outline: none;
+}
+
+.topbar-autostop input[type="number"]::-webkit-inner-spin-button,
+.topbar-autostop input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SHARED PAGE UTILITIES
+   ══════════════════════════════════════════════════════════════ */
+
+/* Generic page loading / error state */
+.page-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: var(--space-lg);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.page-loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border-subtle);
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  animation: page-spin 0.9s linear infinite;
+}
+
+@keyframes page-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Breadcrumb-style context label */
+.page-context-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  user-select: none;
+}

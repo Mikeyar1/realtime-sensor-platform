@@ -1,0 +1,22 @@
+/**
+ * css/pages/replay.css — Replay Sessions page styles.
+ *
+ * Covers: .replay-content and any replay-specific layout.
+ * Topbar elements (transport, selects) live in topbar.css.
+ */
+
+/* ══════════════════════════════════════════════════════════════
+   REPLAY SESSIONS — page layout
+   ══════════════════════════════════════════════════════════════ */
+
+.replay-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+
+.replay-content::-webkit-scrollbar { width: 6px; }
+.replay-content::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 3px;
+}
