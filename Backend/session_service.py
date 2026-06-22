@@ -5,8 +5,8 @@ Routes incoming WebSocket messages to ReplayService or LiveService.
 Builds shared state/catalog payloads and wires the two sub-services together.
 
 State machine:
-  idle → loading → playing → paused → stopped → idle
-                           → finished           → idle
+  idle -> loading -> playing -> paused -> stopped -> idle
+                           -> finished           -> idle
 """
 
 import asyncio
@@ -76,7 +76,7 @@ class SessionService:
             loop                  = loop,
         )
 
-        print("[SessionService] Initialised")
+        print("[SessionService] Initialized")
 
     # Message routing
 
@@ -126,7 +126,6 @@ class SessionService:
             print(f"[SessionService] Unknown message type: {t!r}")
 
     # Connection hook
-
     async def on_client_connect(self, websocket):
         await self._send(websocket, self._state_payload())
         await self._send(websocket, self._catalog_payload())
@@ -134,7 +133,6 @@ class SessionService:
             await self._replay.handle_session_list(websocket)
 
     # InletManager callbacks
-
     def on_sample(self, stream_name: str, timestamp: float, data: list):
         self._live.on_sample(stream_name, timestamp, data)
 
@@ -148,7 +146,6 @@ class SessionService:
         )
 
     # WsBridge helpers
-
     def is_paused(self) -> bool:
         return self._replay.state == "paused"
 
@@ -159,7 +156,6 @@ class SessionService:
         return round(max(0.0, raw), 3)
 
     # Payload builders
-
     def _state_payload(self) -> dict:
         r = self._replay
         return {

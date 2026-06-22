@@ -11,11 +11,12 @@ To add a new drill:
 
 from . import behdisc
 from . import pvt
+from . import l2gonogo
 
 DRILL_MAP: dict[str, object] = {
-    behdisc.DRILL_KEY: behdisc,
-    pvt.DRILL_KEY:     pvt,
-    # "l2gonogo": l2gonogo,  ← add here when ready
+    behdisc.DRILL_KEY:  behdisc,
+    pvt.DRILL_KEY:      pvt,
+    l2gonogo.DRILL_KEY: l2gonogo,
 }
 
-__all__ = ["DRILL_MAP", "behdisc", "pvt"]
+__all__ = ["DRILL_MAP", "behdisc", "pvt", "l2gonogo"]

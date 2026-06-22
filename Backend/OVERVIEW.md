@@ -5,7 +5,7 @@
 >
 > The Backend is the central hub of the system. It speaks LSL inward
 > (sensors / Total Recall) and WebSocket outward (Frontend), managing
-> all session lifecycle decisions and replay playback.
+> all session lifecycle decisions, live recording, and replay playback.
 
 ---
 
@@ -27,8 +27,8 @@ Sensors / Total Recall
 InletManager  ──── samples ──→  SessionService (coordinator)
                                    │              │
                            ReplayService    LiveService
-                           (playback,       (live activation)
-                            session DB)
+                           (playback,       (live recording,
+                            session DB)      Intel capture)
                                    │
                            BatchRouter (high-Hz buffer)
                                    │
@@ -50,14 +50,16 @@ InletManager  ──── samples ──→  SessionService (coordinator)
 Backend/
 │
 ├── websocket_bridge.py         # Transport layer: WS connections, subscription routing
-├── batch_router.py             # High-Hz sample batching (Neon at 200 Hz → 20 frames/s)
 ├── session_service.py          # Coordinator: routes messages to Replay or Live service
 ├── config.py                   # Central config loader (reads config.toml)
 ├── config.toml                 # Runtime configuration (host, port, paths)
 │
 ├── services/
 │   ├── replay_service.py       # All replay/session business logic
-│   └── live_service.py         # Live mode activation and deactivation
+│   └── live_service.py         # All live mode + Intel capture logic
+│
+├── bridge/
+│   └── batch_router.py         # High-Hz sample batching (Neon at 200 Hz → 20 frames/s)
 │
 ├── api/
 │   ├── message_types.py        # Python enum of all WS message type strings
@@ -66,6 +68,7 @@ Backend/
 │
 ├── inlet_manager.py            # LSL inlet watcher: discovers + reads streams
 ├── replay_engine.py            # Manages the Total Recall replay subprocess lifecycle
+├── live_session_writer.py      # Writes live LSL samples to a new .db during capture
 └── stream_meta_parser.py       # Parses LSL StreamInfo XML into Python dicts
 ```
 
@@ -86,6 +89,8 @@ Does **not** contain any business logic. All decisions delegate to `SessionServi
 **Coordinator.** The single entry point for all incoming WS messages and
 all incoming LSL samples. Decides whether a message should go to
 `ReplayService` or `LiveService` based on the current session mode.
+Also owns the `LiveSessionWriter` lifecycle (starts recording when live
+activates, stops when deactivated).
 
 ### `services/replay_service.py`
 All replay-path logic:
@@ -98,8 +103,11 @@ All replay-path logic:
 ### `services/live_service.py`
 All live-path logic:
 - Activating / deactivating live mode
+- Receiving LSL samples and forwarding them to the writer
+- Managing the Intel capture lifecycle (countdown, auto-stop)
+- Broadcasting `live.intel.*` state messages
 
-### `batch_router.py`
+### `bridge/batch_router.py`
 High-frequency stream optimization. Streams at ≥ 100 Hz (e.g. Neon
 Gaze at 200 Hz) are buffered for 50 ms then sent as a single
 `stream.samples` batch message, reducing WebSocket frame rate from 200
@@ -154,5 +162,6 @@ Key message families:
 | `streams.*` | both | Catalog, subscribe/unsubscribe |
 | `stream.sample(s)` | B→F | Sample data (single or batch) |
 | `live.*` | both | Live mode activate/deactivate |
+| `live.intel.*` | both | Intel capture lifecycle |
 | `analysis.*` | B→F | Pre-computed analysis results |
 | `system.*` | both | Ping, pong, state query |

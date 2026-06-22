@@ -51,14 +51,13 @@ class InletThread(threading.Thread):
 
 
 class InletManager:
-    """Discovers LSL streams and manages one InletThread per stream."""
-
+    # Discovers LSL streams and manages one InletThread per stream.
     def __init__(self, on_sample, on_catalog_changed):
         self._on_sample = on_sample
         self._on_catalog_changed = on_catalog_changed
         self._inlets: dict[str, InletThread] = {}
-        self._lock   = threading.Lock()
-        self._stop   = threading.Event()
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
         self._thread = threading.Thread(target=self._discovery_loop, daemon=True)
 
     def start(self):

@@ -105,7 +105,7 @@ function init() {
   // 6. Connect to WebSocket backend
   LabReplay.StreamRouter.connect();
 
-  console.log('[App] Initialization complete.');
+
 }
 
 // type="module" scripts are deferred — DOM is always ready by the time

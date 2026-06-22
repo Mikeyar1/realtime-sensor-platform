@@ -380,7 +380,6 @@ class ReplayEngine:
             if latest is None or dt > latest:
                 latest = dt
 
-        # ── Stitch reconnection segments ─────────────────────────────────────
         # A device that disconnects and reconnects during recording creates a
         # new lsl_metadata row with the same name and target_table_name but a
         # different lsl_metadata_id.  Publishing two LSL outlets with the same

@@ -1,9 +1,9 @@
 """
 websocket_bridge.py — Transport layer only.
 
-Responsibilities:
+Functionalities:
   - Accept / close WebSocket connections
-  - Read raw JSON → call session_service.handle_message()
+  - Read raw JSON -> call session_service.handle_message()
   - Write raw JSON back to individual clients or broadcast to all
   - Route stream.sample messages to subscribed clients (via BatchRouter)
 """
@@ -19,62 +19,53 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from config import HOST, PORT, DB_SCAN_DIR, TOTAL_RECALL_DIR
+from config import HOST, PORT, SESSION_DIR, TOTAL_RECALL_DIR
 from inlet_manager import InletManager
 from replay_engine import ReplayEngine
 from session_service import SessionService
 from batch_router import BatchRouter
 
-print(f"[WsBridge] DB scan dir: {DB_SCAN_DIR}")
-print(f"[WsBridge] Total Recall dir: {TOTAL_RECALL_DIR}")
+print(f"[WsBridge] Sessions .db directory: {SESSION_DIR}")
+print(f"[WsBridge] Total Recall directory: {TOTAL_RECALL_DIR}")
 
 
 class WsBridge:
     """
-    Pure WebSocket transport.
-    Owns: connections dict, subscription sets, raw send/broadcast.
-    Delegates: business logic to SessionService, batching to BatchRouter.
+    WebSocket Transport.
+    Owns connections dict, subscription sets, raw send/broadcast.
+    Delegates business logic to SessionService, batching to BatchRouter.
     """
-
     def __init__(self):
-        self._clients: dict = {}          # websocket → set of subscribed stream names
-        self._lock    = threading.Lock()
-        self._loop:   asyncio.AbstractEventLoop | None = None
-
-        # Engine + inlets
+        self._clients: dict = {}  # websocket - set of subscribed stream names
+        self._lock = threading.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._engine = ReplayEngine(
-            db_scan_dir      = DB_SCAN_DIR,
+            db_scan_dir = SESSION_DIR,
             total_recall_dir = TOTAL_RECALL_DIR,
         )
         self._inlets = InletManager(
-            on_sample          = self._on_sample,
+            on_sample = self._on_sample,
             on_catalog_changed = self._on_catalog_changed,
         )
-
-        # Batch router
         self._router = BatchRouter(
-            clients_lock    = self._lock,
-            clients         = self._clients,
-            get_service_fn  = lambda: self._service,
+            clients_lock = self._lock,
+            clients = self._clients,
+            get_service_fn = lambda: self._service,
         )
-
-        # SessionService wired in _main() once the event loop is running
         self._service: SessionService | None = None
 
-    # Lifecycle
     def run(self):
-        asyncio.run(self._main())
+        asyncio.run(self.main())
 
-    async def _main(self):
+    async def main(self):
         self._loop = asyncio.get_running_loop()
-
         self._service = SessionService(
             replay_engine = self._engine,
             inlet_manager = self._inlets,
             broadcast_fn  = self._broadcast,
             send_fn       = self._send,
             loop          = self._loop,
-            db_scan_dir   = DB_SCAN_DIR,
+            db_scan_dir   = SESSION_DIR,
         )
 
         self._inlets.start()
@@ -129,22 +120,22 @@ class WsBridge:
                 self._clients[websocket].difference_update(stream_ids)
             return
 
-        # Everything else → service
+        # Everything else -> service
         await self._service.handle_message(websocket, msg)
 
     # Sample routing
     def _on_sample(self, stream_name: str, timestamp: float, data: list):
-        """Called from InletManager thread."""
+        # Called from InletManager thread.
         if self._loop is None:
             return
 
-        # Routing: high-Hz → buffer, low-Hz → immediate
+        # Routing: high-Hz -> buffer, low-Hz -> immediate
         self._loop.call_soon_threadsafe(
             self._router.route_sample, stream_name, timestamp, data
         )
 
     def _on_catalog_changed(self, catalog: list):
-        """Called from InletManager thread."""
+        # Called from InletManager thread.
         if self._loop is None or self._service is None:
             return
         self._router.update_stream_rates(catalog)

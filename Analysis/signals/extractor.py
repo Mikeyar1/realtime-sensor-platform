@@ -12,8 +12,87 @@ Public API:
 """
 
 import math
+import sqlite3
 import numpy as np
 from .registry import SIGNALS
+
+
+# ── Session start detection ───────────────────────────────────────────────────
+
+def _get_session_start(db_path: str) -> float | None:
+    """
+    Find the earliest timestamp across all known signal tables.
+    Returns Unix seconds or None if no data found.
+    """
+    tables = [
+        "polar_verity_sense_hr",
+        "polar_h10_heart_rate",
+        "neon_gaze",
+        "neon_imu",
+    ]
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    t_min = None
+    for table in tables:
+        try:
+            row = cur.execute(
+                f"SELECT MIN(unix_timestamp_seconds) FROM {table}"
+            ).fetchone()
+            if row and row[0] is not None:
+                t = float(row[0])
+                if t_min is None or t < t_min:
+                    t_min = t
+        except Exception:
+            pass
+    con.close()
+    return t_min
+
+
+def extract_session_baseline(
+    db_path: str,
+    signal_name: str,
+    t_session_start: float,
+    baseline_s: float,
+) -> dict:
+    """
+    Extract physiological baseline stats from the session-opening window
+    [t_session_start, t_session_start + baseline_s].
+
+    Returns dict with: mean, sd, n, t_start, t_end, duration_s, label, unit.
+    Values are None if insufficient data.
+    """
+    sig_info = SIGNALS.get(signal_name)
+    if not sig_info:
+        return {"error": f"Unknown signal: {signal_name}"}
+
+    fn = sig_info["fn"]
+    try:
+        times, values = fn(db_path, t_session_start, t_session_start + baseline_s)
+    except Exception as e:
+        return {"error": str(e)}
+
+    values = values[~np.isnan(values)] if len(values) > 0 else values
+
+    if len(values) < 2:
+        return {
+            "mean": None, "sd": None, "n": int(len(values)),
+            "t_start": t_session_start,
+            "t_end": t_session_start + baseline_s,
+            "duration_s": baseline_s,
+            "label": sig_info["label"],
+            "unit": sig_info["unit"],
+        }
+
+    return {
+        "mean":       round(float(np.mean(values)), 4),
+        "sd":         round(float(np.std(values)), 4),
+        "n":          int(len(values)),
+        "t_start":    t_session_start,
+        "t_end":      t_session_start + baseline_s,
+        "duration_s": baseline_s,
+        "label":      sig_info["label"],
+        "unit":       sig_info["unit"],
+    }
 
 
 # ── Binning ───────────────────────────────────────────────────────────────────

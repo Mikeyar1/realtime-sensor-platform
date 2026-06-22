@@ -201,7 +201,7 @@ LabReplay.StreamRegistry = (function () {
     const name = streamMeta.name || '';
     const type = streamMeta.stream_type || streamMeta.type || '';
 
-    console.log(`[StreamRegistry] resolve → name="${name}" type="${type}"`);
+
 
     for (const rule of MATCH_RULES) {
       if (rule.test(name, type)) {

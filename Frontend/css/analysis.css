@@ -144,15 +144,11 @@
   font-size: 10px;
 }
 
-/* ── Page Layout ─────────────────────────────────────────────────────────── */
+/* ── Page Layout (unified single-column) ─────────────────────────────────── */
 
-.an-layout {
-  display: flex;
-  gap: 0;
-  height: calc(100vh - 170px);
-  min-height: 500px;
-  overflow: hidden;
-}
+/* an-layout kept for compatibility but no longer used for sidebar/main split */
+.an-layout { display: none; }
+
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 
@@ -312,13 +308,16 @@
 /* ── Main content area ───────────────────────────────────────────────────── */
 
 .an-main {
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px;
+  padding: 16px 20px;
   overflow-y: auto;
   min-width: 0;
+  min-height: 0;   /* allow flex-shrink below content size */
+  flex: 1;         /* fill remaining height of .page.active so scroll is visible */
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .an-chart-card {
@@ -328,6 +327,22 @@
   padding: 0;
   box-shadow: 0 1px 4px rgba(0,0,0,0.05);
   position: relative;
+}
+
+/* Per-trial detail panel — appears in place of the chart when a row is selected */
+.an-pe-panel {
+  background: #ffffff;
+  border: 1px solid rgba(79,70,229,0.18);
+  border-left: 3px solid rgba(79,70,229,0.6);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  animation: an-pe-fadeIn 0.18s ease;
+}
+
+@keyframes an-pe-fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* Title bar inside the chart card */
@@ -444,9 +459,6 @@
 }
 #app.analysis-active #event-bar {
   display: none !important;
-}
-#app.analysis-active .an-layout {
-  height: calc(100vh - 145px);
 }
 
 /* ── Actor Type Badges ──────────────────────────────────────────────────── */
@@ -901,7 +913,24 @@
 .an-kv-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   margin-bottom: 8px;
+}
+
+.an-kv-table th {
+  padding: 5px 10px 5px 0;
+  font: 600 10px/1.4 'Inter', system-ui;
+  color: #9CA3AF;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: left;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
+}
+
+.an-kv-table th:not(:first-child) {
+  text-align: right;
+  width: 80px;
+  padding: 5px 10px;
 }
 
 .an-kv-row {
@@ -1077,4 +1106,583 @@ details[open] .an-pe-json-summary::before { content: '▼  '; }
 
 .an-compare-change-neutral {
   color: #6B7280 !important;
+}
+
+/* ── Session Baseline Panel ──────────────────────────────────────────────── */
+
+.an-baseline-panel {
+  background: #F0FDF4;
+  border: 1px solid #BBF7D0;
+  border-radius: 8px;
+  padding: 10px 16px 12px;
+  margin: 0 0 4px;
+}
+
+.an-bl-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.an-bl-title {
+  font: 700 10px/1 'Inter', system-ui, system-ui;
+  color: #166534;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.an-bl-duration {
+  font: 400 10px/1 'Inter', system-ui, system-ui;
+  color: #4ADE80;
+  background: #166534;
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+.an-bl-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.an-bl-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #D1FAE5;
+  border-radius: 7px;
+  padding: 6px 12px;
+  min-width: 140px;
+}
+
+.an-bl-card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.an-bl-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.an-bl-card-label {
+  font: 500 9px/1 'Inter', system-ui, system-ui;
+  color: #6B7280;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.an-bl-card-value {
+  font: 700 14px/1.2 'Inter', system-ui, system-ui;
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+
+.an-bl-card-unit {
+  font-weight: 400;
+  font-size: 10px;
+  color: #6B7280;
+}
+
+.an-bl-card-sd {
+  font: 400 10px/1 'Inter', system-ui, system-ui;
+  color: #9CA3AF;
+  font-variant-numeric: tabular-nums;
+}
+
+.an-bl-card-n {
+  color: #D1D5DB;
+  font-size: 9px;
+}
+
+/* ── Label hint icon ─────────────────────────────────────────────────────── */
+
+.an-label-hint {
+  font-size: 10px;
+  color: #9CA3AF;
+  cursor: help;
+  margin-left: 3px;
+}
+
+/* ── Compare Button ─────────────────────────────────────────────────────── */
+
+.an-compare-btn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(0,0,0,0.15);
+  background: transparent;
+  font: 500 11px/1.4 'Inter', system-ui, system-ui;
+  color: #6B7280;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.an-compare-btn:hover          { border-color: #3D6ECC; color: #3D6ECC; }
+.an-compare-btn--active        { background: #3D6ECC; color: #fff; border-color: #3D6ECC; }
+
+/* ── Per-Trial Table Section ────────────────────────────────────────────── */
+
+.an-trial-table-section {
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.07);
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  overflow: hidden;
+}
+
+.an-tt-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
+  background: #FAFAFA;
+}
+
+.an-tt-title {
+  font: 600 11px/1 'Inter', system-ui, system-ui;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.an-tt-count {
+  font: 600 11px/1 'Inter', system-ui, system-ui;
+  color: #9CA3AF;
+}
+
+.an-tt-summary {
+  font: 400 11px/1 'Inter', system-ui, system-ui;
+  color: #9CA3AF;
+  margin-left: auto;
+}
+
+.an-tt-hint {
+  font: 400 10px/1 'Inter', system-ui, system-ui;
+  color: #6366f1;
+  background: rgba(99,102,241,0.08);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 20px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.an-tt-scroll {
+  overflow-x: auto;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.an-tt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font: 400 12px/1.4 'Inter', system-ui, system-ui;
+}
+
+.an-tt-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #F9FAFB;
+}
+
+.an-tt-table th {
+  text-align: left;
+  font: 600 10px/1 'Inter', system-ui, system-ui;
+  color: #6B7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  white-space: nowrap;
+}
+
+.an-tt-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.04);
+  color: #374151;
+  white-space: nowrap;
+}
+
+.an-tt-row {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.an-tt-row:hover         { background: rgba(79,70,229,0.04); }
+.an-tt-row--selected     { background: rgba(79,70,229,0.09); }
+.an-tt-row--selected td  { border-bottom-color: rgba(79,70,229,0.12); }
+
+.an-tt-num {
+  font: 600 10px/1 'Inter', system-ui, system-ui;
+  color: #9CA3AF;
+  font-variant-numeric: tabular-nums;
+}
+
+.an-tt-actor {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.an-tt-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font: 700 10px/1.4 'Inter', system-ui, system-ui;
+  letter-spacing: 0.2px;
+}
+.an-tt-badge--h  { background: #FEE2E2; color: #B91C1C; }
+.an-tt-badge--nh { background: #DBEAFE; color: #1E40AF; }
+
+.an-tt-outcome {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font: 500 11px/1.4 'Inter', system-ui, system-ui;
+}
+.an-tt-outcome--good { background: #DCFCE7; color: #15803D; }
+.an-tt-outcome--bad  { background: #FEE2E2; color: #B91C1C; }
+
+.an-tt-rt {
+  font-variant-numeric: tabular-nums;
+  color: #374151;
+}
+
+.an-tt-screen,
+.an-tt-dir,
+.an-tt-shots {
+  color: #6B7280;
+  font-size: 11px;
+}
+
+/* Physio delta cells */
+.an-tt-delta {
+  font: 500 11px/1 'Inter', system-ui, system-ui;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.an-tt-delta--up   { color: #C94444; }   /* HR up = stress signal */
+.an-tt-delta--dn   { color: #1D4ED8; }
+.an-tt-delta--none { color: #D1D5DB; }
+
+/* ── Inline per-trial detail row ─────────────────────────────────────────── */
+
+.an-tt-detail-row td {
+  padding: 0 !important;
+  border-bottom: 2px solid rgba(79,70,229,0.2) !important;
+}
+
+.an-pe-inline {
+  background: linear-gradient(135deg, #f5f3ff 0%, #eff6ff 100%);
+  border-left: 3px solid rgba(79,70,229,0.5);
+  padding: 14px 16px;
+  animation: an-pe-fadeIn 0.15s ease;
+}
+
+.an-pe-inline-header {
+  font: 600 12px/1.4 'Inter', system-ui;
+  color: #4338ca;
+  letter-spacing: 0.2px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.an-pe-inline-close {
+  cursor: pointer;
+  color: #9CA3AF;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 3px;
+  transition: background 0.1s, color 0.1s;
+}
+.an-pe-inline-close:hover { background: rgba(0,0,0,0.06); color: #374151; }
+
+.an-pe-inline-body { display: flex; flex-direction: column; gap: 14px; }
+
+.an-pe-kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px 16px;
+}
+
+.an-pe-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.an-pe-kv-label {
+  font: 400 10px/1 'Inter', system-ui;
+  color: #9CA3AF;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.an-pe-kv-val {
+  font: 600 13px/1.4 'Inter', system-ui;
+  color: #111827;
+}
+
+.an-pe-section-label {
+  font: 600 10px/1 'Inter', system-ui;
+  color: #6B7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.an-pe-physio {
+  width: 100%;
+  border-collapse: collapse;
+  font: 400 12px/1.4 'Inter', system-ui;
+}
+
+.an-pe-physio th {
+  text-align: left;
+  font: 600 10px/1 'Inter', system-ui;
+  color: #9CA3AF;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 4px 8px 6px 0;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
+}
+
+.an-pe-physio td {
+  padding: 5px 8px 5px 0;
+  color: #374151;
+  border-bottom: 1px solid rgba(0,0,0,0.04);
+}
+
+.an-pe-physio tbody tr:last-child td { border-bottom: none; }
+
+/* ── Per-trial accordion ──────────────────────────────────────────────────── */
+
+#an-accordion {
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.07);
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  overflow: hidden;
+}
+
+.an-accordion-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
+  background: #FAFAFA;
+}
+
+.an-accordion-title {
+  font: 600 11px/1 'Inter', system-ui;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.an-accordion-hint {
+  font: 400 10px/1 'Inter', system-ui;
+  color: #6366f1;
+  background: rgba(99,102,241,0.08);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 20px;
+  padding: 3px 8px;
+}
+
+/* Each accordion card */
+.an-ac-card {
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+.an-ac-card:last-child { border-bottom: none; }
+
+/* Collapsed row */
+.an-ac-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  cursor: pointer;
+  list-style: none;
+  font: 400 12px/1.4 'Inter', system-ui;
+  color: #374151;
+  transition: background 0.12s;
+  user-select: none;
+}
+.an-ac-summary::-webkit-details-marker { display: none; }
+.an-ac-summary:hover { background: rgba(99,102,241,0.04); }
+.an-ac-card[open] .an-ac-summary { background: rgba(99,102,241,0.06); }
+
+.an-ac-num {
+  font: 600 11px/1 'Inter', system-ui;
+  color: #9CA3AF;
+  min-width: 28px;
+}
+
+.an-ac-badge {
+  font: 600 10px/1 'Inter', system-ui;
+  padding: 3px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.an-ac-badge--good { background: #DCFCE7; color: #15803D; }
+.an-ac-badge--bad  { background: #FEE2E2; color: #B91C1C; }
+
+.an-ac-metric {
+  font: 400 11px/1 'Inter', system-ui;
+  color: #6B7280;
+  white-space: nowrap;
+}
+.an-ac-metric-label {
+  font-weight: 600;
+  color: #9CA3AF;
+  margin-right: 3px;
+}
+
+.an-ac-physio-summary {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.an-ac-delta {
+  font: 600 10px/1 'Inter', system-ui;
+  padding: 2px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.an-ac-delta--up { color: #C94444; background: #FEE2E2; }
+.an-ac-delta--dn { color: #1D4ED8; background: #DBEAFE; }
+
+.an-ac-arrow {
+  font-size: 10px;
+  color: #9CA3AF;
+  transition: transform 0.15s;
+}
+.an-ac-card[open] .an-ac-arrow { transform: rotate(90deg); }
+
+/* Expanded body */
+.an-ac-body {
+  padding: 14px 16px 16px;
+  background: linear-gradient(135deg, #f9f7ff 0%, #eff6ff 100%);
+  border-top: 1px solid rgba(99,102,241,0.1);
+  animation: an-pe-fadeIn 0.15s ease;
+}
+
+.an-ac-kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px 20px;
+  margin-bottom: 14px;
+}
+.an-ac-kv { display: flex; flex-direction: column; gap: 3px; }
+.an-ac-kv-label {
+  font: 400 10px/1 'Inter', system-ui;
+  color: #9CA3AF;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.an-ac-kv-val { font: 600 13px/1.4 'Inter', system-ui; color: #111827; }
+
+.an-ac-section {
+  font: 600 10px/1 'Inter', system-ui;
+  color: #6B7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.an-ac-physio {
+  width: 100%;
+  border-collapse: collapse;
+  font: 400 12px/1.4 'Inter', system-ui;
+}
+.an-ac-physio th {
+  text-align: left;
+  font: 600 10px/1 'Inter', system-ui;
+  color: #9CA3AF;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 4px 8px 6px 0;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
+}
+.an-ac-physio td {
+  padding: 5px 8px 5px 0;
+  color: #374151;
+  border-bottom: 1px solid rgba(0,0,0,0.04);
+}
+.an-ac-physio tbody tr:last-child td { border-bottom: none; }
+.an-ac-unit { opacity: 0.5; font-size: 10px; }
+
+/* ── L2GoNoGo-specific styles ─────────────────────────────────────────────── */
+
+/* GO/NOGO target type badges in accordion */
+.an-ac-badge--go   { background: #DCFCE7; color: #15803D; }
+.an-ac-badge--nogo { background: #FEF9C3; color: #854D0E; }
+
+/* Sub-scenario row in stats panel */
+.an-sub-scen-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 10px;
+  flex-wrap: wrap;
+}
+.an-sub-scen-label {
+  font: 600 10px/1 'Inter', system-ui;
+  color: #9CA3AF;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.an-tag {
+  font: 500 10px/1 'Inter', system-ui;
+  padding: 3px 8px;
+  border-radius: 20px;
+  background: rgba(99,102,241,0.08);
+  border: 1px solid rgba(99,102,241,0.2);
+  color: #4F46E5;
+}
+
+/* count column in GO performance table */
+.an-kv-count {
+  padding: 5px 10px;
+  font: 600 13px/1.4 'Inter', system-ui;
+  color: #111827;
+  text-align: right;
+  width: 80px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Good/bad value colors */
+.an-kv-val--good { color: #15803D; font-weight: 600; }
+.an-kv-val--bad  { color: #B91C1C; font-weight: 600; }
+
+/* ── L2GoNoGo table % column and no-data note ───────────────────────────── */
+.an-kv-pct {
+  padding: 5px 10px;
+  font: 500 12px/1.4 'Inter', system-ui;
+  color: #6B7280;
+  text-align: right;
+  white-space: nowrap;
+}
+.an-kv-pct.an-kv-val--good { color: #15803D; font-weight: 600; }
+.an-kv-pct.an-kv-val--bad  { color: #B91C1C; font-weight: 600; }
+
+.an-no-data-note {
+  font: 400 11px/1.5 'Inter', system-ui;
+  color: #9CA3AF;
+  font-style: italic;
+  padding: 6px 14px 10px;
+  margin: 0;
 }

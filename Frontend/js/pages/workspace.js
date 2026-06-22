@@ -42,7 +42,7 @@ LabReplay.PerformanceWorkspacePage = (function () {
     slot.innerHTML = `
       <div class="topbar" id="workspace-topbar">
 
-        <span class="topbar-page-title">Performance Workspace</span>
+        <span class="topbar-page-title">Human Performance Replay</span>
 
         <div class="topbar-sep"></div>
 

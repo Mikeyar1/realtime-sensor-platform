@@ -23,10 +23,14 @@ LabReplay.StatsPanel = (function () {
   function render(epochData, trialSummary) {
     if (!_el) return;
     const sigKeys = Object.keys(epochData.signals).filter(k => !epochData.signals[k].error);
-    const isBehDisc = (trialSummary.n_hostile != null || trialSummary.n_nonhostile != null);
+    // Route to the right renderer by drill
+    const isBehDisc  = (trialSummary.n_hostile > 0 || trialSummary.n_nonhostile > 0);
+    const isL2GoNoGo = (_term.drill_short === 'L2GoNoGo');
     _el.innerHTML = isBehDisc
       ? _renderBehDisc(epochData, trialSummary, sigKeys)
-      : _renderGeneric(epochData, trialSummary, sigKeys);
+      : isL2GoNoGo
+        ? _renderL2GoNoGo(epochData, trialSummary, sigKeys)
+        : _renderGeneric(epochData, trialSummary, sigKeys);
   }
 
   function clear() { if (_el) _el.innerHTML = ''; }
@@ -56,7 +60,11 @@ LabReplay.StatsPanel = (function () {
       ['Correct Restraint Rate', p(s.correct_restraint_rate_pct), 'withholds / non-hostile'],
       ['False Positive Rate', p(s.false_positive_rate_pct), 'errors / non-hostile'],
       ['False Negative Rate', p(s.false_negative_rate_pct), 'misses / hostile'],
-    ];
+      s.mean_ttff_ms != null
+        ? ['Time to First Fixation — Mean', `${s.mean_ttff_ms} ms`, 'target onset → first fixation'] : null,
+      s.mean_gaze_dispersion_px != null
+        ? ['Gaze Dispersion — Mean', `${s.mean_gaze_dispersion_px} px`, 'RMS spread in 500 ms window'] : null,
+    ].filter(Boolean);
 
     const rowsHtml = rows.map(([label, val, formula]) => `
       <tr class="an-ss-row">
@@ -190,57 +198,226 @@ LabReplay.StatsPanel = (function () {
       </table>`;
   }
 
-  // ── Generic drill (PVT etc.) ──────────────────────────────────────────────────
+  // ── Generic drill (PVT, L2GoNoGo, etc.) ────────────────────────────────────
 
   function _renderGeneric(epochData, s, sigKeys) {
+    const ms   = v => v != null ? `${(v * 1000).toFixed(0)} ms` : '—';
+    const pct  = (n, d) => (d > 0) ? `${(n / d * 100).toFixed(1)}%` : '—';
     const rtLabel = _term.rt_label || 'Reaction Time';
-    const rtRow = s.rt_mean_s != null ? `
-      <tr class="an-stats-rt-row">
-        <td class="an-stats-signal">⏱ ${rtLabel}</td>
-        <td class="an-stats-val" colspan="2">
-          mean ${(s.rt_mean_s * 1000).toFixed(0)} ms
-          ± ${s.rt_std_s ? (s.rt_std_s * 1000).toFixed(0) : '—'} ms
-        </td>
-        <td class="an-stats-val">${s.rt_min_s != null ? (s.rt_min_s * 1000).toFixed(0) + ' ms min' : '—'}</td>
-        <td class="an-stats-val">${s.rt_max_s != null ? (s.rt_max_s * 1000).toFixed(0) + ' ms max' : '—'}</td>
-      </tr>` : '';
+    const total   = s.n_trials || 0;
+    const nHits   = s.n_hits   || 0;
+    const nMisses = s.n_misses || 0;
+    const nLapses = s.n_lapses || 0;
+    const nAnt    = s.n_anticipation_errors || 0;
 
+    const kvRows = [
+      [_term.trial_label ? `${_term.trial_label}s` : 'Trials', String(total)],
+      ['Hit Rate',         pct(nHits,   total)],
+      ['Miss Rate',        pct(nMisses, total)],
+      ['Lapse Rate',       pct(nLapses, total)],
+      nAnt ? ['Anticipation Errors', String(nAnt)] : null,
+      [rtLabel + ' — Mean', ms(s.rt_mean_s)],
+      [rtLabel + ' — SD',   ms(s.rt_std_s)],
+      [rtLabel + ' — Min',  ms(s.rt_min_s)],
+      [rtLabel + ' — Max',  ms(s.rt_max_s)],
+      // Gaze metrics (when Neon data available)
+      s.mean_ttff_ms != null
+        ? ['Time to First Fixation — Mean', `${s.mean_ttff_ms} ms`] : null,
+      s.mean_gaze_dispersion_px != null
+        ? ['Gaze Dispersion — Mean', `${s.mean_gaze_dispersion_px} px`] : null,
+    ].filter(Boolean);
+
+    const kvHtml = kvRows.map(([label, val]) => `
+      <tr class="an-kv-row">
+        <td class="an-kv-label">${label}</td>
+        <td class="an-kv-val">${val}</td>
+      </tr>`).join('');
+
+    // Per-signal physio table (analysis window vs session baseline)
     const sigRows = sigKeys.map(sig => {
-      const d = epochData.signals[sig];
-      const blVal = _fmt(d.baseline_mean, d.unit);
+      const d     = epochData.signals[sig];
       const anVal = _fmt(d.analysis_mean, d.unit);
       const delta = d.delta;
-      const dStr = delta != null ? `${delta > 0 ? '+' : ''}${delta.toFixed(2)}` : '—';
-      const pct = d.delta_pct != null ? `${d.delta_pct > 0 ? '+' : ''}${d.delta_pct.toFixed(1)}%` : '—';
-      const dir = delta != null ? (delta > 0 ? '↑' : delta < 0 ? '↓' : '→') : '';
+      const dStr  = delta != null ? `${delta > 0 ? '+' : ''}${delta.toFixed(2)}` : '—';
+      const pctD  = d.delta_pct != null ? `${d.delta_pct > 0 ? '+' : ''}${d.delta_pct.toFixed(1)}%` : '—';
+      const dir   = delta != null ? (delta > 0 ? '↑' : delta < 0 ? '↓' : '→') : '';
       return `
         <tr>
           <td class="an-stats-signal">
             <span class="an-stats-dot" style="background:${d.color}"></span>
             ${d.label} <span class="an-stats-unit">${d.unit}</span>
           </td>
-          <td class="an-stats-val">${blVal}</td>
           <td class="an-stats-val">${anVal}</td>
           <td class="an-stats-delta ${_deltaClass(delta)}">${dStr} <span class="an-stats-unit">${d.unit}</span></td>
-          <td class="an-stats-pct ${_deltaClass(delta)}">${pct} ${dir}</td>
+          <td class="an-stats-pct  ${_deltaClass(delta)}">${pctD} ${dir}</td>
         </tr>`;
     }).join('');
 
     return `
-      <div class="an-stats-header">
-        Physio Summary — N=${epochData.n_trials} ${_term.trial_label || 'trial'}s
-        &nbsp;|&nbsp; Baseline: ${epochData.baseline_s}s &nbsp;|&nbsp; Analysis: ${epochData.analysis_s}s
+      <div class="an-stats-section-header">${_term.drill_name || 'Drill'} — Session Summary</div>
+      <div class="an-stats-group-card" style="margin-bottom:8px">
+        <table class="an-kv-table"><tbody>${kvHtml}</tbody></table>
       </div>
+      <div class="an-stats-section-header">Physio Response (Analysis Window vs Session Baseline)</div>
       <table class="an-stats-table">
         <thead><tr>
-          <th>Signal</th><th>Baseline mean</th><th>Analysis mean</th>
-          <th>Δ (native units)</th><th>Δ %</th>
+          <th>Signal</th><th>Analysis Mean</th>
+          <th>&#916; (units)</th><th>&#916; %</th>
         </tr></thead>
-        <tbody>${sigRows}${rtRow}</tbody>
+        <tbody>${sigRows}</tbody>
       </table>
       ${_footnote()}
     `;
   }
+
+
+
+  function _renderL2GoNoGo(epochData, s, sigKeys) {
+    const ms  = v => v != null ? `${(v * 1000).toFixed(0)} ms` : '—';
+    const pct = v => v != null ? `${v.toFixed(1)}%` : '—';
+    const rt  = _term.rt_label || 'Response Time';
+    const nGO = s.n_go_trials != null ? s.n_go_trials : (s.n_trials || 0);
+
+
+    // ── GO performance ──
+    // Count + % rows
+    const goCountRows = [
+      [_term.hit_label   || 'Correct GO (Hit)',       s.n_hits   || 0, pct(s.go_hit_pct)],
+      [_term.lapse_label || 'Omission (No Response)', s.n_lapses || 0, pct(s.go_omission_pct)],
+      [_term.miss_label  || 'Errant Shot (Miss)',     s.n_misses || 0, pct(s.go_miss_pct)],
+    ];
+    // Plain stat rows (no %)
+    const goStatRows = [
+      s.mean_shots_per_engagement != null
+        ? ['Shots per Engagement',    `${s.mean_shots_per_engagement} avg`] : null,
+      s.mean_distance_m != null
+        ? ['Target Distance — Mean', `${s.mean_distance_m} m`]             : null,
+    ].filter(Boolean);
+
+    const goCountHtml = goCountRows.map(([label, n, p]) => `
+      <tr class="an-kv-row">
+        <td class="an-kv-label">${label}</td>
+        <td class="an-kv-count">${n}</td>
+        <td class="an-kv-pct">${p}</td>
+      </tr>`).join('');
+
+    const goStatHtml = goStatRows.map(([label, val]) => `
+      <tr class="an-kv-row">
+        <td class="an-kv-label">${label}</td>
+        <td class="an-kv-val" colspan="2">${val}</td>
+      </tr>`).join('');
+
+    // ── NO-GO performance ──
+    const nogoBlock = (s.n_nogo_trials > 0) ? `
+      <div class="an-stats-section-header">NO-GO Performance</div>
+      <div class="an-stats-group-card" style="margin-bottom:8px">
+        <table class="an-kv-table">
+          <thead><tr><th>Metric</th><th>n</th><th>%</th></tr></thead>
+          <tbody>
+            <tr class="an-kv-row">
+              <td class="an-kv-label">NO-GO Trials (neutral)</td>
+              <td class="an-kv-count">${s.n_nogo_trials}</td>
+              <td class="an-kv-pct">—</td>
+            </tr>
+            <tr class="an-kv-row">
+              <td class="an-kv-label">${_term.withhold_label || 'Correct Rejection'}</td>
+              <td class="an-kv-count">${s.n_correct_withholds || 0}</td>
+              <td class="an-kv-pct an-kv-val--good">${pct(s.nogo_correct_withhold_pct)}</td>
+            </tr>
+            <tr class="an-kv-row">
+              <td class="an-kv-label">${_term.fa_label || 'Commission Error (false alarm)'}</td>
+              <td class="an-kv-count">${s.n_commission_errors || 0}</td>
+              <td class="an-kv-pct ${(s.n_commission_errors || 0) > 0 ? 'an-kv-val--bad' : ''}">${(s.n_commission_errors || 0) > 0 ? pct(s.nogo_commission_error_pct) : '—'}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>` : '';
+
+    // ── RT & Gaze rows ──
+    const rtRows = [
+      [`${rt} — Mean`, ms(s.rt_mean_s)],
+      [`${rt} — SD`,   ms(s.rt_std_s)],
+      [`${rt} — Min`,  ms(s.rt_min_s)],
+      [`${rt} — Max`,  ms(s.rt_max_s)],
+      s.mean_ttff_ms != null
+        ? ['Time to First Fixation — Mean', `${s.mean_ttff_ms} ms`]           : null,
+      s.mean_gaze_dispersion_px != null
+        ? ['Gaze Dispersion — Mean',        `${s.mean_gaze_dispersion_px} px`] : null,
+    ].filter(Boolean);
+
+    const rtHtml = rtRows.map(([label, val]) => `
+      <tr class="an-kv-row">
+        <td class="an-kv-label">${label}</td>
+        <td class="an-kv-val" colspan="2">${val}</td>
+      </tr>`).join('');
+
+    // ── Physio table ──
+    const sigRows = sigKeys.map(sig => {
+      const d     = epochData.signals[sig];
+      const anVal = _fmt(d.analysis_mean, d.unit);
+      const delta = d.delta;
+      const dStr  = delta != null ? `${delta > 0 ? '+' : ''}${delta.toFixed(2)}` : '—';
+      const pctD  = d.delta_pct != null ? `${d.delta_pct > 0 ? '+' : ''}${d.delta_pct.toFixed(1)}%` : '—';
+      const dir   = delta != null ? (delta > 0 ? '↑' : delta < 0 ? '↓' : '→') : '';
+      return `<tr>
+        <td class="an-stats-signal">
+          <span class="an-stats-dot" style="background:${d.color}"></span>
+          ${d.label} <span class="an-stats-unit">${d.unit}</span>
+        </td>
+        <td class="an-stats-val">${anVal}</td>
+        <td class="an-stats-delta ${_deltaClass(delta)}">${dStr} <span class="an-stats-unit">${d.unit}</span></td>
+        <td class="an-stats-pct ${_deltaClass(delta)}">${pctD} ${dir}</td>
+      </tr>`;
+    }).join('');
+
+    const hasPhysioData = sigKeys.some(sig => epochData.signals[sig].analysis_mean != null);
+    const physioNote = !hasPhysioData
+      ? `<p class="an-no-data-note">Session baseline (Pupil: ${epochData.session_baseline?.pupil?.mean != null ? epochData.session_baseline.pupil.mean.toFixed(1) + ' mm' : '—'}) was captured from the pre-drill window. Physio data was not streamed during drill trials in this recording &mdash; HR, Pupil, and RMSSD require active sensor connections throughout the drill to appear here.</p>`
+      : '';
+
+    const hasGaze = s.mean_ttff_ms != null || s.mean_gaze_dispersion_px != null;
+    const rtHeader = hasGaze ? 'Response Time &amp; Gaze' : 'Response Time';
+
+    return `
+      <div class="an-stats-section-header">${_term.drill_name || 'L2 Go/No-Go'} — Session Summary</div>
+
+      <div class="an-stats-section-header">GO Performance</div>
+      <div class="an-stats-group-card" style="margin-bottom:8px">
+        <table class="an-kv-table">
+          <thead><tr><th>Metric</th><th>n</th><th>%</th></tr></thead>
+          <tbody>
+            <tr class="an-kv-row">
+              <td class="an-kv-label">GO Trials (Ivan appeared)</td>
+              <td class="an-kv-count">${nGO}</td>
+              <td class="an-kv-pct" style="color:#9CA3AF">total</td>
+            </tr>
+            ${goCountHtml}
+          </tbody>
+        </table>
+        ${goStatHtml ? `<table class="an-kv-table" style="border-top:1px solid rgba(0,0,0,.06);margin-top:2px">
+          <tbody>${goStatHtml}</tbody></table>` : ''}
+      </div>
+
+      ${nogoBlock}
+
+      <div class="an-stats-section-header">${rtHeader}</div>
+      <div class="an-stats-group-card" style="margin-bottom:8px">
+        <table class="an-kv-table"><tbody>${rtHtml}</tbody></table>
+      </div>
+
+      <div class="an-stats-section-header">Physio Response (Analysis Window vs Session Baseline)</div>
+      ${physioNote}
+      <table class="an-stats-table">
+        <thead><tr>
+          <th>Signal</th><th>Analysis Mean</th>
+          <th>&#916; (units)</th><th>&#916; %</th>
+        </tr></thead>
+        <tbody>${sigRows}</tbody>
+      </table>
+      ${_footnote()}
+    `;
+  }
+
 
   // ── Footnote ──────────────────────────────────────────────────────────────────
 
@@ -260,23 +437,58 @@ LabReplay.StatsPanel = (function () {
     _el.innerHTML = _renderSingleTrial(epochData, trial, sigKeys);
   }
 
+  // Render per-trial stats into an arbitrary element (e.g. an-pe-panel).
+  // The aggregate _el stays untouched.
+  function renderPerEngagementInto(el, epochData, trial) {
+    if (!el) return;
+    const sigKeys = Object.keys(epochData.signals).filter(k => !epochData.signals[k].error);
+    el.innerHTML = _renderSingleTrial(epochData, trial, sigKeys);
+  }
+
   function _renderSingleTrial(epochData, trial, sigKeys) {
+    const isBehDisc = trial.actor_type != null;
     const isHostile = trial.actor_type === 'HOSTILE';
-    const hasCE = trial.outcome === 'COMMISSION_ERROR';
+    const hasCE     = trial.outcome === 'COMMISSION_ERROR';
+    const rtMs      = trial.rt_s != null ? `${(trial.rt_s * 1000).toFixed(0)} ms` : 'N/A';
+    const shots     = trial.n_shots != null && trial.n_shots > 0 ? `${trial.n_shots}\u00d7` : 'N/A';
 
-    const rtMs = trial.rt_s != null
-      ? `${(trial.rt_s * 1000).toFixed(0)} ms`
-      : 'N/A';
-    const shots = trial.n_shots != null && trial.n_shots > 0
-      ? `${trial.n_shots}×`
-      : 'N/A';
-
-    const kvs = [
-      ['Actor', trial.actor_name || trial.actor_short || `#${trial.index}`],
-      ['Type', isHostile ? 'Hostile' : 'Non-Hostile'],
-      ['Reaction time (1st shot)', (isHostile || hasCE) ? rtMs : 'N/A'],
-      ['Shots', (isHostile || hasCE) ? shots : 'N/A'],
-    ];
+    let kvs;
+    if (isBehDisc) {
+      const outcomeB = _term[
+        trial.outcome === 'HIT'              ? 'hit_label'      :
+        trial.outcome === 'MISS'             ? 'miss_label'     :
+        trial.outcome === 'COMMISSION_ERROR' ? 'fa_label'       :
+        trial.outcome === 'CORRECT_WITHHOLD' ? 'withhold_label' : null
+      ] || trial.outcome;
+      kvs = [
+        ['Actor',   trial.actor_name || trial.actor_short || `#${trial.index}`],
+        ['Type',    isHostile ? 'Hostile' : 'Non-Hostile'],
+        ['Outcome', outcomeB],
+        ['Reaction Time (1st shot)', (isHostile || hasCE) ? rtMs : 'N/A'],
+        ['Shots', (isHostile || hasCE) ? shots : 'N/A'],
+        trial.ttff_ms            != null ? ['Time to First Fixation', `${trial.ttff_ms} ms`] : null,
+        trial.gaze_dispersion_px != null ? ['Gaze Dispersion', `${trial.gaze_dispersion_px.toFixed(0)} px`] : null,
+      ].filter(Boolean);
+    } else {
+      // Generic drill (PVT, L2GoNoGo)
+      const outcomeLabel = _term[
+        trial.outcome === 'HIT'              ? 'hit_label'      :
+        trial.outcome === 'MISS'             ? 'miss_label'     :
+        trial.outcome === 'LAPSE'            ? 'lapse_label'    :
+        trial.outcome === 'OMISSION'         ? 'lapse_label'    :
+        trial.outcome === 'ANTICIPATION_ERROR' ? 'fa_label'     :
+        trial.outcome === 'COMMISSION_ERROR' ? 'fa_label'       :
+        trial.outcome === 'CORRECT_WITHHOLD' ? 'withhold_label' : null
+      ] || trial.outcome;
+      kvs = [
+        ['Outcome', outcomeLabel],
+        [_term.rt_label || 'Reaction Time', rtMs],
+        trial.screen      != null ? ['Screen',    String(trial.screen)] : null,
+        trial.direction_deg != null ? ['Direction', `${Math.round(trial.direction_deg)}°`] : null,
+        trial.ttff_ms            != null ? ['Time to First Fixation', `${trial.ttff_ms} ms`] : null,
+        trial.gaze_dispersion_px != null ? ['Gaze Dispersion', `${trial.gaze_dispersion_px.toFixed(0)} px`] : null,
+      ].filter(Boolean);
+    }
 
     const kvHtml = kvs.map(([label, val]) => `
       <tr class="an-kv-row">
@@ -285,12 +497,11 @@ LabReplay.StatsPanel = (function () {
       </tr>`).join('');
 
     return `
-      <div class="an-stats-section-header">Engagement #${trial.index}</div>
-      <div class="an-pe-card">
+      <div class="an-stats-section-header">${_term.drill_name || 'Drill'} — ${_term.trial_label || 'Trial'} #${trial.index}</div>
+      <div class="an-stats-group-card" style="margin-bottom:8px">
         <table class="an-kv-table"><tbody>${kvHtml}</tbody></table>
       </div>
-
-      <div class="an-stats-section-header">Physio Response</div>
+      <div class="an-stats-section-header">Physio Response (Analysis Window vs Session Baseline)</div>
       ${_singleTrialPhysio(epochData, trial.index, sigKeys)}
       ${_footnote()}
     `;
@@ -298,65 +509,66 @@ LabReplay.StatsPanel = (function () {
 
   function _singleTrialPhysio(epochData, trialIdx, sigKeys) {
     const rows = sigKeys.map(sig => {
-      const d = epochData.signals[sig];
+      const d     = epochData.signals[sig];
       const times = d.times || [];
-      // Find this trial's epoch
-      const ep = (d.epochs || []).find(e => e.trial_index === trialIdx);
+      const ep    = (d.epochs || []).find(e => e.trial_index === trialIdx);
+
       if (!ep) {
         return `
-          <tr class="an-stats-physio-row">
-            <td><span class="an-stats-dot" style="background:${d.color}"></span>${d.label}</td>
-            <td>—</td>
-            <td>—</td>
-            <td>—</td>
+          <tr>
+            <td class="an-stats-signal">
+              <span class="an-stats-dot" style="background:${d.color}"></span>
+              ${d.label} <span class="an-stats-unit">${d.unit}</span>
+            </td>
+            <td class="an-stats-val">—</td>
+            <td class="an-stats-delta an-tt-delta--none">—</td>
+            <td class="an-stats-pct  an-tt-delta--none">—</td>
           </tr>`;
       }
 
+      // Analysis window: times >= 0
       const values = ep.values || [];
-
-      // Split into baseline (<0) and analysis (>=0) windows
-      const blVals = [];
       const anVals = [];
       for (let i = 0; i < Math.min(values.length, times.length); i++) {
         const v = values[i];
-        if (v == null || isNaN(v)) continue;
-        if (times[i] < 0) {
-          blVals.push(v);
-        } else {
-          anVals.push(v);
-        }
+        if (v == null || isNaN(v) || times[i] < 0) continue;
+        anVals.push(v);
       }
 
       const mean = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
-      const blV = mean(blVals);
-      const anV = mean(anVals);
-      const delt = (blV != null && anV != null) ? anV - blV : null;
+      const anV  = mean(anVals);
 
-      const blStr = _fmt(blV, d.unit);
-      const anStr = _fmt(anV, d.unit);
-      const dStr = delt != null
-        ? `${delt > 0 ? '+' : ''}${delt.toFixed(3)}${_unitSuffix(d.unit)}`
-        : '—';
-      const dir = delt != null ? (delt > 0 ? '↑' : delt < 0 ? '↓' : '→') : '';
+      // Baseline: session-level baseline (consistent with aggregate view)
+      const blV  = epochData.session_baseline?.[sig]?.mean ?? null;
+
+      const delt  = (blV != null && anV != null) ? anV - blV : null;
+      const pctD  = (delt != null && blV)  ? (delt / Math.abs(blV)) * 100 : null;
+
+      const anStr  = _fmt(anV, d.unit);
+      const dStr   = delt != null ? `${delt > 0 ? '+' : ''}${delt.toFixed(2)}` : '—';
+      const pctStr = pctD != null ? `${pctD > 0 ? '+' : ''}${pctD.toFixed(1)}%` : '—';
+      const dir    = delt != null ? (delt > 0 ? '↑' : delt < 0 ? '↓' : '→') : '';
 
       return `
-        <tr class="an-stats-physio-row">
-          <td><span class="an-stats-dot" style="background:${d.color}"></span>${d.label}</td>
-          <td>${blStr}</td>
-          <td>${anStr}</td>
-          <td class="${_deltaClass(delt)}">${dStr} ${dir}</td>
+        <tr>
+          <td class="an-stats-signal">
+            <span class="an-stats-dot" style="background:${d.color}"></span>
+            ${d.label} <span class="an-stats-unit">${d.unit}</span>
+          </td>
+          <td class="an-stats-val">${anStr}</td>
+          <td class="an-stats-delta ${_deltaClass(delt)}">${dStr} <span class="an-stats-unit">${d.unit}</span></td>
+          <td class="an-stats-pct  ${_deltaClass(delt)}">${pctStr} ${dir}</td>
         </tr>`;
     }).join('');
 
     return `
-      <div class="an-pe-card">
-        <table class="an-stats-physio-mini">
-          <thead><tr>
-            <th>Signal</th><th>Baseline</th><th>Analysis</th><th>Δ</th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
+      <table class="an-stats-table">
+        <thead><tr>
+          <th>Signal</th><th>Analysis Mean</th>
+          <th>&#916; (units)</th><th>&#916; %</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
   }
 
   // ── Per-Engagement: multi-trial selection ────────────────────────────────────
@@ -364,22 +576,30 @@ LabReplay.StatsPanel = (function () {
   function renderPerEngagementMulti(epochData, trials) {
     if (!_el) return;
     const sigKeys = Object.keys(epochData.signals).filter(k => !epochData.signals[k].error);
-    const nH = trials.filter(t => t.actor_type === 'HOSTILE').length;
+    const nH  = trials.filter(t => t.actor_type === 'HOSTILE').length;
     const nNH = trials.filter(t => t.actor_type === 'NON_HOSTILE').length;
+    const isBehDisc = nH > 0 || nNH > 0;
+
+    let breakdownHtml;
+    if (isBehDisc) {
+      breakdownHtml = `
+        <tr class="an-kv-row"><td class="an-kv-label">Hostile</td><td class="an-kv-val">${nH}</td></tr>
+        <tr class="an-kv-row"><td class="an-kv-label">Non-Hostile</td><td class="an-kv-val">${nNH}</td></tr>`;
+    } else {
+      const oc = {};
+      trials.forEach(t => { oc[t.outcome] = (oc[t.outcome] || 0) + 1; });
+      breakdownHtml = Object.entries(oc).map(([k, v]) =>
+        `<tr class="an-kv-row"><td class="an-kv-label">${k}</td><td class="an-kv-val">${v}</td></tr>`
+      ).join('');
+    }
+
     _el.innerHTML = `
-      <div class="an-stats-section-header">Selection — ${trials.length} engagements</div>
+      <div class="an-stats-section-header">Selection \u2014 ${trials.length} ${_term.trial_label || 'trial'}s</div>
       <div class="an-pe-card">
         <table class="an-kv-table"><tbody>
-          <tr class="an-kv-row">
-            <td class="an-kv-label">Hostile</td>
-            <td class="an-kv-val">${nH}</td>
-          </tr>
-          <tr class="an-kv-row">
-            <td class="an-kv-label">Non-Hostile</td>
-            <td class="an-kv-val">${nNH}</td>
-          </tr>
+          ${breakdownHtml}
         </tbody></table>
-        <p class="an-pe-hint">Click a single row to see per-engagement details.</p>
+        <p class="an-pe-hint">Click a single row to see per-trial details.</p>
       </div>
       ${_footnote()}
     `;
@@ -461,5 +681,5 @@ LabReplay.StatsPanel = (function () {
     return `<span class="${cls}">${formattedVal} ${arrow}</span>`;
   }
 
-  return { init, setTerminology, render, renderPerEngagement, renderPerEngagementMulti, renderComparison, clear };
+  return { init, setTerminology, render, renderPerEngagement, renderPerEngagementInto, renderPerEngagementMulti, renderComparison, clear };
 })();

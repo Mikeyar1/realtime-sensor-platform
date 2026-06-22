@@ -25,33 +25,31 @@ dist/
 wheels/
 *.egg-info/
 .eggs/
+.uv/
+.uv-cache/
 
 # ── Virtual environments ──────────────────────────────────────────────────────
 .venv/
 venv/
 env/
 .env
+.env.*
 
-# ── Experimental / session data ───────────────────────────────────────────────
-# Raw recorded session databases — too large and contain participant data
+# ── Session / participant data — never commit raw recordings ──────────────────
 Data/
 !Data/images/
 !Data/images/platform.png
-
-# SQLite session databases inside total-recall (large binary files)
-total-recall/sessions/*.db
+total-recall/sessions/
 total-recall/*.db
 
-# ── Temporary / scratch files ─────────────────────────────────────────────────
+# ── Scratch / temporary work ──────────────────────────────────────────────────
+scratch/
 temp.py
 *.tmp
 *.log
 
-# ── Word documents ────────────────────────────────────────────────────────────
-# Checked in as markdown instead; .docx binary is not diff-friendly
+# ── Binary / generated artifacts ─────────────────────────────────────────────
 *.docx
-
-# ── C build artifacts (learning/ experiments) ─────────────────────────────────
 learning/*.o
 learning/a.out
 learning/server

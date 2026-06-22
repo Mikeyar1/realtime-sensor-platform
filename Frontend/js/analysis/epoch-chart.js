@@ -15,12 +15,13 @@ window.LabReplay = window.LabReplay || {};
 
 LabReplay.EpochChart = (function () {
 
-  const SIGNAL_ORDER = ['hr', 'pupil', 'motion'];
+  const SIGNAL_ORDER = ['hr', 'pupil', 'rmssd', 'motion'];
 
   const SIGNAL_META = {
-    hr: { color: '#C94444', label: 'Heart Rate', yLabel: 'Heart Rate (BPM)', unit: 'bpm', yRange: [40, 160] },
-    pupil: { color: '#7C6AE8', label: 'Pupil Diameter', yLabel: 'Pupil Diameter (mm)', unit: 'mm', yRange: [0, 8] },
-    motion: { color: '#F39C12', label: 'Motion Intensity', yLabel: 'Motion Intensity [0–1]', unit: '', yRange: [0, 1] },
+    hr:     { color: '#C94444', label: 'Heart Rate',       yLabel: 'Heart Rate (BPM)',      unit: 'bpm',  yRange: [40, 160] },
+    pupil:  { color: '#7C6AE8', label: 'Pupil Diameter',   yLabel: 'Pupil Diameter (mm)',   unit: 'mm',   yRange: [0, 8] },
+    rmssd:  { color: '#22C55E', label: 'RMSSD',            yLabel: 'RMSSD (ms)',            unit: 'ms',   yRange: null },
+    motion: { color: '#F39C12', label: 'Motion Intensity', yLabel: 'Motion Intensity [0–1]', unit: '',    yRange: [0, 1] },
   };
 
   const OUTCOME_COLORS = {
@@ -369,10 +370,12 @@ LabReplay.EpochChart = (function () {
       const sigMeta = SIGNAL_META[sig] || {};
 
       layout[xAxisKey] = {
-        range: [-_baseline - 0.1, _analysis + 0.1],
+        range: _baseline > 0
+          ? [-_baseline - 0.1, _analysis + 0.1]
+          : [-0.1, _analysis + 0.1],   // analysis-only mode (session_opening baseline)
         domain: [0, 1],
         anchor: `y${axSuffix}`,
-        matches: i === 0 ? undefined : 'x',   // share x with subplot 1
+        matches: i === 0 ? undefined : 'x',
         zeroline: false,
         gridcolor: 'rgba(0,0,0,0.05)',
         tickfont: { size: 10 },
@@ -430,16 +433,21 @@ LabReplay.EpochChart = (function () {
       layer: 'above',
     }));
 
-    layout.shapes = [
-      // Baseline region fill
-      {
+    const shapes = [];
+
+    // Baseline region fill — only when we have a per-trial pre-stimulus window
+    if (_baseline > 0) {
+      shapes.push({
         type: 'rect',
         xref: 'x', yref: 'paper',
         x0: -_baseline, x1: 0,
         y0: 0, y1: 1,
         fillcolor: 'rgba(107,114,128,0.05)',
         line: { width: 0 }, layer: 'below',
-      },
+      });
+    }
+
+    shapes.push(
       // Analysis region fill
       {
         type: 'rect',
@@ -459,16 +467,20 @@ LabReplay.EpochChart = (function () {
       },
       // Per-subplot border outlines
       ...subplotBorders,
-    ];
+    );
+    layout.shapes = shapes;
 
     // Region label annotations at top of the figure
-    const topDomain = domains[0][1];  // top of first subplot
-    layout.annotations = [
-      {
+    const topDomain = domains[0][1];
+    const annots = [];
+    if (_baseline > 0) {
+      annots.push({
         x: -_baseline / 2, xref: 'x', yref: 'paper', y: topDomain + 0.015,
         text: 'Baseline Window', showarrow: false,
         font: { size: 9, color: '#9CA3AF' }, xanchor: 'center',
-      },
+      });
+    }
+    annots.push(
       {
         x: _analysis / 2, xref: 'x', yref: 'paper', y: topDomain + 0.015,
         text: 'Analysis Window', showarrow: false,
@@ -479,14 +491,14 @@ LabReplay.EpochChart = (function () {
         text: eventLabel, showarrow: false,
         font: { size: 8, color: '#C94444' }, xanchor: 'left',
       },
-      // t=0 marker below the bottom x-axis
       {
         x: 0, xref: 'x', yref: 'paper', y: -0.04,
         text: '<b>t=0</b>', showarrow: false,
         font: { size: 9, color: '#C94444' }, xanchor: 'center',
         yanchor: 'top',
       },
-    ];
+    );
+    layout.annotations = [...layout.annotations, ...annots];
 
     return layout;
   }

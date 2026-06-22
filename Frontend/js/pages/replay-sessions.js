@@ -92,12 +92,7 @@ LabReplay.ReplaySessionsPage = (function () {
 
         <!-- Transport controls -->
         <div class="topbar-transport" id="rp-transport">
-          <button class="topbar-transport-btn" id="rp-btn-skip-back"  title="Skip to start">|◀</button>
-          <button class="topbar-transport-btn" id="rp-btn-rewind"     title="Rewind">◀◀</button>
-          <button class="topbar-transport-btn play-pause" id="rp-btn-play" title="Play / Pause">▶</button>
-          <button class="topbar-transport-btn stop-btn"  id="rp-btn-stop"  title="Stop">■</button>
-          <button class="topbar-transport-btn" id="rp-btn-forward"    title="Fast forward">▶▶</button>
-          <button class="topbar-transport-btn" id="rp-btn-skip-end"   title="Skip to end">▶|</button>
+          <button class="topbar-transport-btn play-pause" id="rp-btn-play" title="Play / Stop">▶ Play</button>
         </div>
 
         <!-- Right: connection + SessionInfo chips -->
@@ -130,16 +125,18 @@ LabReplay.ReplaySessionsPage = (function () {
 
     const bind = (id, fn) => slot.querySelector(`#${id}`)?.addEventListener('click', fn);
 
-    bind('rp-btn-play',      () => {
-      if (_sessionState === 'playing') SR.sendPause();
-      else SR.sendPlay();
+    // Play/Stop toggle — optimistic label flip on click, backend response re-syncs.
+    bind('rp-btn-play', () => {
+      const btn = document.getElementById('rp-btn-play');
+      if (_sessionState === 'playing') {
+        if (btn) btn.textContent = '▶ Play';   // flip immediately
+        SR.sendStop();
+      } else {
+        if (btn) btn.textContent = '■ Stop';   // flip immediately
+        SR.sendPlay();
+      }
     });
-    bind('rp-btn-stop',      () => SR.sendStop());
-    bind('rp-btn-skip-back', () => SR.sendSeek(0));
-    bind('rp-btn-skip-end',  () => SR.sendSeek(Infinity));
-    bind('rp-btn-rewind',    () => {});   // future
-    bind('rp-btn-forward',   () => {});   // future
-    bind('rp-clear-btn',     () => _clearSession());
+    bind('rp-clear-btn', () => _clearSession());
 
     // Session select
     const selectEl = slot.querySelector('#rp-session-select');
@@ -254,16 +251,9 @@ LabReplay.ReplaySessionsPage = (function () {
   function _applySessionState(state) {
     const playBtn = document.getElementById('rp-btn-play');
     if (playBtn) {
-      playBtn.textContent = state === 'playing' ? '⏸' : '▶';
+      playBtn.textContent = state === 'playing' ? '■ Stop' : '▶ Play';
+      playBtn.disabled = state === 'idle';
     }
-
-    // Disable transport when no session loaded
-    const noSession = state === 'idle';
-    ['rp-btn-play','rp-btn-stop','rp-btn-skip-back','rp-btn-skip-end',
-     'rp-btn-rewind','rp-btn-forward'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.disabled = noSession;
-    });
 
     _setElapsed(_elapsedS);
 

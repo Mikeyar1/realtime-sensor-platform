@@ -71,28 +71,23 @@ LabReplay.StreamRouter = (function () {
         // Reset shared LSL start reference when a new play begins
         if (msg.state === 'playing' && _lastSessionState !== 'playing') {
           _sessionLslStart = null;
-          console.log('[StreamRouter] New play — resetting LSL session clock.');
         }
         _lastSessionState = msg.state;
-        console.log('[StreamRouter] session.state:', msg.state, `${msg.elapsed_seconds}s / ${msg.duration_seconds}s`);
         LabReplay.ModeManager.onSessionState(msg);
         break;
 
       // ── Session list ───────────────────────────────────────────────────
       case 'session.list.result':
-        console.log('[StreamRouter] Session list:', msg.sessions?.length, 'files');
         LabReplay.EventBus.emit('session-list-received', msg.sessions || []);
         break;
 
       // ── Stream catalog ─────────────────────────────────────────────────
       case 'streams.catalog':
         catalog = msg.streams || [];
-        console.log('[StreamRouter] Catalog:', catalog.length, 'streams');
         LabReplay.EventBus.emit('catalog-updated', catalog);
         break;
 
       case 'streams.subscribed':
-        console.log('[StreamRouter] Subscription confirmed:', msg.stream_ids);
         break;
 
       // ── Sample data (single) ───────────────────────────────────────────
@@ -113,7 +108,7 @@ LabReplay.StreamRouter = (function () {
 
 
       case 'stream.lost':
-        console.log('[StreamRouter] Stream lost:', msg.stream_id, '—', msg.reason || '');
+        console.warn('[StreamRouter] Stream lost:', msg.stream_id, msg.reason || '');
         LabReplay.EventBus.emit('stream-lost', { id: msg.stream_id, reason: msg.reason });
         break;
 
@@ -166,27 +161,15 @@ LabReplay.StreamRouter = (function () {
     }
   }
 
-  const _sampleCounters = {};
   function _routeSample(streamId, timestamp, data, elapsedS) {
-    _sampleCounters[streamId] = (_sampleCounters[streamId] || 0) + 1;
-    const count = _sampleCounters[streamId];
     const instances = chartInstances[streamId];
 
-    // Compute elapsed using LSL timestamps exclusively.
-    // The backend elapsed_s uses time.time() but LSL uses pylsl.local_clock()
-    // (macOS uptime), so they are in different clock domains and cannot be mixed.
-    // Instead, the FIRST LSL timestamp received after play sets the shared t=0.
     if (_sessionLslStart === null && timestamp) {
       _sessionLslStart = timestamp;
-      console.log('[StreamRouter] Session LSL start anchored at', timestamp.toFixed(3));
     }
     const elapsed = (_sessionLslStart !== null && timestamp)
       ? Math.max(0, parseFloat((timestamp - _sessionLslStart).toFixed(3)))
       : null;
-
-    if (count <= 3 || count % 500 === 0) {
-      console.log(`[StreamRouter] sample #${count} for "${streamId}" → ${instances ? instances.length : 0} instance(s), elapsed=${elapsed?.toFixed(1)}s, data=`, Array.isArray(data) ? data.slice(0, 3) : data);
-    }
 
     if (instances) {
       for (const inst of instances) {
@@ -234,7 +217,6 @@ LabReplay.StreamRouter = (function () {
     const ids = Array.isArray(streamIds) ? streamIds : [streamIds];
     ids.forEach(id => subscribed.add(id));
     _send({ type: 'streams.subscribe', stream_ids: ids });
-    console.log('[StreamRouter] Subscribed:', ids);
   }
 
   function unsubscribe(streamIds) {
@@ -250,7 +232,6 @@ LabReplay.StreamRouter = (function () {
 
   function loadSession(path) {
     _send({ type: 'session.load', path });
-    console.log('[StreamRouter] Loading session:', path);
   }
 
   function unloadSession() {

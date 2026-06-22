@@ -84,7 +84,7 @@ LabReplay.ModeManager = (function () {
     els.dbSelect?.addEventListener('change', () => {
       const path = els.dbSelect.value;
       if (path) {
-        console.log('[ModeManager] Session selected:', path);
+
         LabReplay.StreamRouter.loadSession(path);
       }
     });
@@ -170,7 +170,7 @@ LabReplay.ModeManager = (function () {
       if (s.path === prev) opt.selected = true;
       els.dbSelect.appendChild(opt);
     }
-    console.log(`[ModeManager] Dropdown populated with ${sessions.length} session(s)`);
+
   }
 
   // ── Play/Pause click ─────────────────────────────────────────────────────────

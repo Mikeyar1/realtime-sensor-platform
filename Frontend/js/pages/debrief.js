@@ -246,7 +246,7 @@ LabReplay.DebriefPage = (function () {
       lfhf_slope_threshold: 0.3,
     };
 
-    console.log('[DebriefPage] sending payload:', payload);
+
 
     const btn = document.getElementById('db-run-btn');
     if (btn) {

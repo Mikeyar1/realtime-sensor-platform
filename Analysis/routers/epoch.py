@@ -15,20 +15,25 @@ from pydantic import BaseModel
 
 from config import SESSIONS_DIR
 from drills import DRILL_MAP
-from signals import extract_epochs, SIGNALS, grand_average, _clean, _scalar
+from signals import (
+    extract_epochs, SIGNALS, grand_average, _clean, _scalar,
+    extract_session_baseline, _get_session_start,
+)
+from signals.gaze_metrics import enrich_trials
 
 router = APIRouter()
 
 
 class EpochRequest(BaseModel):
-    session:    str
-    drill:      str
-    trial_ids:  Optional[list[int]] = None   # 1-based indices; None = all
-    signals:    list[str] = ["hr", "pupil", "motion"]
-    baseline_s: float = 2.0
-    analysis_s: float = 2.0
-    bin_s:      float = 0.1
-    do_zscore:  bool  = True
+    session:       str
+    drill:         str
+    trial_ids:     Optional[list[int]] = None   # 1-based indices; None = all
+    signals:       list[str] = ["hr", "pupil", "rmssd"]
+    baseline_s:    float = 30.0
+    analysis_s:    float = 2.0
+    bin_s:         float = 0.1
+    do_zscore:     bool  = False
+    baseline_mode: str   = "session_opening"  # "session_opening" | "per_trial"
 
 
 def _db_path(filename: str) -> Path:
@@ -96,6 +101,9 @@ def compute_epoch(req: EpochRequest):
     if not trials:
         raise HTTPException(status_code=404, detail="No trials match the requested IDs")
 
+    # Enrich with per-trial gaze metrics (ttff_ms, gaze_dispersion_px)
+    enrich_trials(str(db), trials)
+
     anchor_times = [t["t0"] for t in trials]
 
     # Validate signals
@@ -106,6 +114,27 @@ def compute_epoch(req: EpochRequest):
             detail=f"Unknown signals: {invalid}. Valid: {list(SIGNALS)}",
         )
 
+    # ── Session-opening baseline ────────────────────────────────────────────────
+    # When baseline_mode = "session_opening", compute baseline stats from the
+    # first baseline_s seconds of the session instead of per-trial pre-stimulus.
+    # Epochs are then extracted with baseline_s=0 (analysis window only).
+    session_baseline: dict = {}
+    epoch_baseline_s = req.baseline_s   # passed to extract_epochs
+
+    if req.baseline_mode == "session_opening":
+        t_start = _get_session_start(str(db))
+        if t_start is None:
+            raise HTTPException(status_code=404, detail="No signal data found in session")
+        for sig in req.signals:
+            session_baseline[sig] = extract_session_baseline(
+                db_path        = str(db),
+                signal_name    = sig,
+                t_session_start= t_start,
+                baseline_s     = req.baseline_s,
+            )
+        # Epochs only cover [0, analysis_s] — no negative pre-trial window
+        epoch_baseline_s = 0.0
+
     # Extract epochs per signal
     signal_results: dict = {}
     for sig in req.signals:
@@ -114,7 +143,7 @@ def compute_epoch(req: EpochRequest):
                 db_path      = str(db),
                 anchor_times = anchor_times,
                 signal_name  = sig,
-                baseline_s   = req.baseline_s,
+                baseline_s   = epoch_baseline_s,
                 analysis_s   = req.analysis_s,
                 bin_s        = req.bin_s,
                 do_zscore    = req.do_zscore,
@@ -133,10 +162,58 @@ def compute_epoch(req: EpochRequest):
         except Exception as e:
             signal_results[sig] = {"error": str(e)}
 
-    # ── Actor-type split averages (BehDisc: hostile vs non-hostile) ──────────
+    # ── Aggregate delta for ALL drills ─────────────────────────────────────────
+    # Compute analysis_mean, baseline_mean, delta across all extracted epochs.
+    # For session_opening mode: baseline = session_baseline mean, analysis = epoch mean.
+    # For per_trial mode: baseline = pre-event mean (times < 0), analysis = post-event mean.
+    for sig, result in signal_results.items():
+        if "error" in result or "epochs" not in result:
+            continue
+
+        all_epoch_values = [ep["values"] for ep in result["epochs"] if ep.get("values")]
+        if not all_epoch_values:
+            result.update({"analysis_mean": None, "baseline_mean": None,
+                           "delta": None, "delta_pct": None})
+            continue
+
+        arrays = [
+            np.array([v if v is not None else float("nan") for v in e])
+            for e in all_epoch_values
+        ]
+        grand_avg = np.nanmean(np.stack(arrays, axis=0), axis=0)
+        times_arr = np.array(result["times"])
+        an_mask   = times_arr >= 0
+        an_vals   = grand_avg[an_mask]
+        an_vals   = an_vals[~np.isnan(an_vals)]
+        an_mean   = float(np.mean(an_vals)) if len(an_vals) > 0 else None
+
+        if req.baseline_mode == "session_opening":
+            # Use session-level baseline reference
+            sb = session_baseline.get(sig, {})
+            bl_mean = sb.get("mean") if isinstance(sb, dict) else None
+        else:
+            # Use per-trial pre-event window
+            bl_mask = times_arr < 0
+            bl_vals = grand_avg[bl_mask]
+            bl_vals = bl_vals[~np.isnan(bl_vals)]
+            bl_mean = float(np.mean(bl_vals)) if len(bl_vals) > 0 else None
+
+        delta = round(an_mean - bl_mean, 4) if (an_mean is not None and bl_mean is not None) else None
+        delta_pct = round((delta / abs(bl_mean)) * 100, 2) if (delta is not None and bl_mean) else None
+
+        result.update({
+            "analysis_mean": _scalar(an_mean),
+            "baseline_mean": _scalar(bl_mean),
+            "delta":         _scalar(delta),
+            "delta_pct":     _scalar(delta_pct),
+        })
+
+
+    # Actor-type split averages (BehDisc: hostile vs non-hostile) ──────────
     hostile_indices    = {t["index"] for t in trials if t.get("actor_type") == "HOSTILE"}
     nonhostile_indices = {t["index"] for t in trials if t.get("actor_type") == "NON_HOSTILE"}
     has_type_split     = bool(hostile_indices or nonhostile_indices)
+
 
     if has_type_split:
         for sig, result in signal_results.items():
@@ -170,17 +247,30 @@ def compute_epoch(req: EpochRequest):
             })
 
     return {
-        "signals":        signal_results,
-        "has_type_split": has_type_split,
+        "signals":          signal_results,
+        "has_type_split":   has_type_split,
+        "session_baseline": session_baseline,   # {} when baseline_mode=per_trial
+        "baseline_mode":    req.baseline_mode,
         "trials_used": [
             {
-                "index":       t["index"],
-                "outcome":     t["outcome"],
-                "rt_s":        t.get("rt_s"),
-                "actor_type":  t.get("actor_type"),
-                "actor_name":  t.get("actor_name"),
-                "actor_short": t.get("actor_short"),
-                "n_shots":     t.get("n_shots"),
+                "index":               t["index"],
+                "outcome":             t["outcome"],
+                "rt_s":                t.get("rt_s"),
+                "actor_type":          t.get("actor_type"),
+                "actor_name":          t.get("actor_name"),
+                "actor_short":         t.get("actor_short"),
+                "n_shots":             t.get("n_shots"),
+                # Generic / PVT fields
+                "screen":              t.get("screen"),
+                "direction_deg":       t.get("direction_deg"),
+                # L2GoNoGo-specific fields
+                "direction":           t.get("direction"),
+                "distance_m":          t.get("distance_m"),
+                "sub_scenario":        t.get("sub_scenario"),
+                "target_type":         t.get("target_type"),
+                # Gaze metrics (all drills)
+                "ttff_ms":             t.get("ttff_ms"),
+                "gaze_dispersion_px":  t.get("gaze_dispersion_px"),
             }
             for t in trials
         ],

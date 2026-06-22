@@ -9,9 +9,9 @@ To add a new signal:
   2. Add one entry to SIGNALS below.
 """
 
-from .hr     import extract as _hr
-from .pupil  import extract as _pupil
-from .motion import extract as _motion
+from .hr   import extract as _hr
+from .pupil import extract as _pupil
+from .hrv  import extract_rmssd as _rmssd
 
 SIGNALS: dict[str, dict] = {
     "hr": {
@@ -26,10 +26,10 @@ SIGNALS: dict[str, dict] = {
         "unit":  "mm",
         "color": "#7C6AE8",
     },
-    "motion": {
-        "fn":    _motion,
-        "label": "Motion Intensity",
-        "unit":  "[0\u20131]",
-        "color": "#F39C12",
+    "rmssd": {
+        "fn":    _rmssd,
+        "label": "RMSSD",
+        "unit":  "ms",
+        "color": "#22C55E",
     },
 }

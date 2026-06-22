@@ -1,32 +1,36 @@
 """
 drills/pvt/algorithm.py — Psychomotor Vigilance Task trial detection.
 
-Event structure (from lsl_unmapped_samples):
-  Stream A (PVT controller, ~134 events, ~45 trials):
-    SCENARIO_READY   ← inter-trial interval
-    TARGET_APPEAR    ← stimulus on screen            ← t = 0
-    DRILL_END        ← trial window closes (~4s)
+Algorithm (VirTra native events only, no PVT controller stream required):
+─────────────────────────────────────────────────────────────────────────
+Each trial corresponds to one appearance of the "8'' Circle Target":
 
-  Stream B (V-AIMS native):
-    Target Activated   ← confirms TARGET_APPEAR
-    Shot Fired         ← trainee responds
-    Shot Hit           ← confirmed hit
-    Unscored Hit       ← hit, score = 0
-    Shot Miss          ← missed
-    Target Deactivated ← stimulus off (lapse if shot not yet fired)
+  Target Activated   → stimulus onset = t0
+  [Shot Fired]       → trainee response (may occur 0, 1, or many times)
+  [Shot Hit]         → scored hit (result = "Hit")
+  [Unscored Hit]     → hit after window closed (score = 0)
+  [Shot Miss]        → fired but missed
+  Target Deactivated → stimulus offset
 
-Trial anchor (t = 0):  TARGET_APPEAR
-Reaction time:         t(Shot Fired) − t(TARGET_APPEAR)
-Outcome:
-  HIT   → shot fired in (TARGET_APPEAR, DRILL_END], result = Hit or Unscored Hit
-  MISS  → shot fired after Target Deactivated OR no shot before DRILL_END
-  ERROR → shot fired before TARGET_APPEAR (anticipation)
+Outcome classification
+──────────────────────
+  HIT               — shot fired within window AND result is Hit or Unscored Hit
+  MISS              — shot fired within window but result is Shot Miss
+  LAPSE             — no shot fired before Target Deactivated (no-response)
+  ANTICIPATION      — shot fired before t0 (before target appeared)
+
+Reaction time
+─────────────
+  RT = t(first Shot Fired after t0) − t0
+       None for LAPSE and ANTICIPATION
 """
 
-import json
-import sqlite3
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from typing import Optional
+
+from drills.virtra_common import get_all_virtra_events
 
 
 DRILL_KEY = "pvt"
@@ -37,147 +41,192 @@ TERMINOLOGY = {
     "anchor_label":  "Target Appeared",
     "hit_label":     "Hit",
     "miss_label":    "Miss",
+    "lapse_label":   "Lapse (No Response)",
     "fa_label":      "Anticipation Error",
     "rt_label":      "Reaction Time",
     "trial_label":   "Trial",
-    "event_desc":    "Target appeared on screen",
+    "event_desc":    "Target circle appeared on screen",
 }
 
-TRIAL_WINDOW_S = 5.0   # Maximum expected RT; beyond this = miss
+# ── Config ────────────────────────────────────────────────────────────────────
 
+#: Expected target name in VirTra events (substring match, case-insensitive)
+TARGET_NAME = "8'' circle target"
+
+#: Outcome string constants
+HIT          = "HIT"
+MISS         = "MISS"
+LAPSE        = "LAPSE"
+ANTICIPATION = "ANTICIPATION_ERROR"
+
+#: Maximum seconds to look ahead for Shot/Deactivated after Target Activated
+LOOKAHEAD_S  = 8.0
+
+#: Relevant event types we need from the DB
+_NEEDED = {
+    "Scenario Started",
+    "Target Activated",
+    "Target Deactivated",
+    "Shot Fired",
+    "Shot Hit",
+    "Unscored Hit",
+    "Shot Miss",
+}
+
+
+# ── Data class ────────────────────────────────────────────────────────────────
 
 @dataclass
 class Trial:
-    index:        int
-    t0:           float             # TARGET_APPEAR absolute timestamp
-    t_drill_end:  Optional[float] = None
-    t_shot:       Optional[float] = None
-    outcome:      str = "MISS"      # HIT | MISS | ANTICIPATION_ERROR
-    rt_s:         Optional[float] = None
-    shot_number:  Optional[int]  = None
+    index:      int
+    t0:         float                     # Target Activated timestamp
+    t_end:      Optional[float] = None    # Target Deactivated timestamp
+    outcome:    str             = LAPSE
+    rt_s:       Optional[float] = None
+    n_shots:    int             = 0
+    screen:     Optional[int]   = None    # VirTra screen (1/2/3) of first shot
+    distance_m: Optional[float] = None   # target distance from meta
+    direction:  Optional[float] = None   # target direction (deg) from meta
 
 
-def _parse_sample(raw_json: str) -> tuple[str, str, dict]:
-    try:
-        parsed = json.loads(raw_json)
-    except Exception:
-        return "", "", {}
-
-    if isinstance(parsed, list) and len(parsed) >= 1:
-        etype = parsed[0].get("value", "") if isinstance(parsed[0], dict) else str(parsed[0])
-        desc  = parsed[1].get("value", "") if len(parsed) > 1 and isinstance(parsed[1], dict) else ""
-        meta_raw = parsed[3].get("value", "") if len(parsed) > 3 and isinstance(parsed[3], dict) else ""
-        meta = {}
-        try:
-            pairs = json.loads(meta_raw)
-            if isinstance(pairs, list):
-                meta = {str(p[0]): str(p[1]) for p in pairs if len(p) >= 2}
-        except Exception:
-            pass
-        return etype, desc, meta
-    return "", "", {}
-
-
-def _all_events(db_path: str) -> list[tuple[float, str, str, dict]]:
-    con = sqlite3.connect(db_path)
-    cur = con.cursor()
-    cols = [c[1] for c in cur.execute("PRAGMA table_info(lsl_unmapped_samples)").fetchall()]
-    json_col = "sample_json" if "sample_json" in cols else (cols[6] if len(cols) > 6 else cols[-1])
-    rows = cur.execute(
-        f"SELECT unix_timestamp_seconds, {json_col} FROM lsl_unmapped_samples "
-        f"ORDER BY unix_timestamp_seconds"
-    ).fetchall()
-    con.close()
-
-    events = []
-    for ts, raw in rows:
-        etype, desc, meta = _parse_sample(raw)
-        if etype:
-            events.append((float(ts), etype, desc, meta))
-    return events
-
+# ── Extraction ────────────────────────────────────────────────────────────────
 
 def extract_trials(db_path: str) -> list[dict]:
-    events = _all_events(db_path)
+    """
+    Parse a LabReplay .db file and return all PVT trials detected via
+    Target Activated / Target Deactivated pairs for the circle target.
+
+    Returns a list of trial dicts sorted by t0.
+    """
+    events = get_all_virtra_events(db_path, event_filter=_NEEDED)
     if not events:
         return []
 
-    # Controller events (PVT stream)
-    ctrl = [(ts, et, desc, meta)
-            for ts, et, desc, meta in events
-            if et in ("SCENARIO_READY", "TARGET_APPEAR", "DRILL_END")]
+    # ── Detect scenario start ─────────────────────────────────────────────────
+    t_scenario_start: Optional[float] = None
+    for ts, etype, desc, _ in events:
+        if etype == "Scenario Started" and "PVT" in desc:
+            t_scenario_start = ts
+            break
 
-    # V-AIMS shot/outcome events
-    shots = [(ts, et, desc, meta)
-             for ts, et, desc, meta in events
-             if et in ("Shot Fired", "Shot Hit", "Unscored Hit", "Shot Miss",
-                       "Target Activated", "Target Deactivated")]
+    # ── Build (t_activate, t_deactivate, meta) windows ───────────────────────
+    open_activations: list[float] = []   # stack of Target Activated timestamps
+    windows: list[tuple[float, Optional[float], dict]] = []
 
+    for ts, etype, desc, meta in events:
+        if etype == "Target Activated" and TARGET_NAME in desc.lower():
+            open_activations.append(ts)
+        elif etype == "Target Deactivated" and TARGET_NAME in desc.lower():
+            if open_activations:
+                t_act = open_activations.pop(0)
+                windows.append((t_act, ts, meta))
+
+    # Flush any still-open windows (no deactivation seen)
+    for t_act in open_activations:
+        windows.append((t_act, None, {}))
+
+    # ── Build shot/result event list for fast lookups ─────────────────────────
+    shot_events = [
+        (ts, etype, meta)
+        for ts, etype, _, meta in events
+        if etype in ("Shot Fired", "Shot Hit", "Unscored Hit", "Shot Miss")
+    ]
+
+    # ── Classify each window ──────────────────────────────────────────────────
     trials: list[Trial] = []
-    idx = 0
-    i   = 0
 
-    while i < len(ctrl):
-        ts, et, desc, meta = ctrl[i]
-
-        if et == "TARGET_APPEAR":
-            t_appear = ts
-            t_end    = None
-
-            # Find next DRILL_END
-            j = i + 1
-            while j < len(ctrl):
-                nts, net, _, _ = ctrl[j]
-                if nts - t_appear > TRIAL_WINDOW_S + 2.0:
-                    break
-                if net == "DRILL_END":
-                    t_end = nts
-                    j += 1
-                    break
-                j += 1
-
-            t_window_end = t_end if t_end else (t_appear + TRIAL_WINDOW_S)
-            trial = Trial(index=idx + 1, t0=t_appear, t_drill_end=t_window_end)
-
-            # Find first Shot Fired in [t_appear - 0.05, t_window_end]
-            for sts, set_, _, smeta in shots:
-                if sts < t_appear - 0.05:
-                    continue
-                if sts > t_window_end + 0.5:
-                    break
-                if set_ == "Shot Fired":
-                    trial.t_shot     = sts
-                    trial.rt_s       = round(sts - t_appear, 3)
-                    trial.shot_number = int(smeta.get("ShotNumber", 0)) or None
-                    # Shot before stimulus = anticipation error
-                    if sts < t_appear:
-                        trial.outcome = "ANTICIPATION_ERROR"
-                    else:
-                        # Look for outcome event within 0.2s
-                        trial.outcome = "MISS"
-                        for rts, ret, _, _ in shots:
-                            if abs(rts - sts) < 0.3 and ret in ("Shot Hit", "Unscored Hit", "Shot Miss"):
-                                trial.outcome = "HIT" if ret != "Shot Miss" else "MISS"
-                                break
-                    break
-
-            trials.append(trial)
-            idx += 1
-            i = j
+    for t0, t_end, act_meta in windows:
+        # Only count windows that begin after scenario start
+        if t_scenario_start is not None and t0 < t_scenario_start - 1.0:
             continue
 
-        i += 1
+        # Effective end of window
+        effective_end = t_end if t_end is not None else (t0 + LOOKAHEAD_S)
+
+        trial = Trial(
+            index       = 0,
+            t0          = t0,
+            t_end       = t_end,
+            distance_m  = _to_float(act_meta.get("Distance (m)") or act_meta.get("Distance")),
+            direction   = _to_float(act_meta.get("Direction")),
+        )
+
+        # Collect shot events within (t0 − 0.2, effective_end + 0.3)
+        shots_in_window = [
+            (ts, etype, meta)
+            for ts, etype, meta in shot_events
+            if t0 - 0.2 <= ts <= effective_end + 0.3
+        ]
+
+        fired = [(ts, meta) for ts, et, meta in shots_in_window if et == "Shot Fired"]
+        hits  = [ts for ts, et, _ in shots_in_window if et in ("Shot Hit", "Unscored Hit")]
+        misses= [ts for ts, et, _ in shots_in_window if et == "Shot Miss"]
+
+        if not fired:
+            # No shot at all → LAPSE
+            trial.outcome = LAPSE
+            trial.n_shots = 0
+        else:
+            first_shot_ts   = fired[0][0]
+            first_shot_meta = fired[0][1]
+
+            # Capture screen number (1-indexed integer)
+            try:
+                trial.screen = int(first_shot_meta.get("Screen", 0)) or None
+            except (TypeError, ValueError):
+                trial.screen = None
+
+            if first_shot_ts < t0:
+                # Shot before target appeared → anticipation
+                trial.outcome = ANTICIPATION
+                trial.rt_s    = round(first_shot_ts - t0, 3)  # negative RT
+                trial.n_shots = len(fired)
+            elif hits:
+                # At least one hit result
+                trial.outcome = HIT
+                trial.rt_s    = round(first_shot_ts - t0, 3)
+                trial.n_shots = len(fired)
+            elif misses:
+                # Shot(s) fired but all missed
+                trial.outcome = MISS
+                trial.rt_s    = round(first_shot_ts - t0, 3)
+                trial.n_shots = len(fired)
+            else:
+                # Shot Fired events seen but no outcome event yet resolved
+                # (rare: deactivated before result event arrived)
+                trial.outcome = MISS
+                trial.rt_s    = round(first_shot_ts - t0, 3)
+                trial.n_shots = len(fired)
+
+        trials.append(trial)
+
+    # ── Sort and assign 1-based index ─────────────────────────────────────────
+    trials.sort(key=lambda t: t.t0)
+    for i, t in enumerate(trials):
+        t.index = i + 1
 
     return [_to_dict(t) for t in trials]
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _to_float(value: Optional[str]) -> Optional[float]:
+    try:
+        return float(value) if value is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
 def _to_dict(t: Trial) -> dict:
     return {
-        "index":       t.index,
-        "t0":          t.t0,
-        "outcome":     t.outcome,
-        "rt_s":        t.rt_s,
-        "shot_number": t.shot_number,
-        "t_drill_end": t.t_drill_end,
-        "terminology": TERMINOLOGY,
+        "index":         t.index,
+        "t0":            t.t0,
+        "outcome":       t.outcome,
+        "rt_s":          t.rt_s,
+        "n_shots":       t.n_shots,
+        "t_end":         t.t_end,
+        "screen":        t.screen,
+        "distance_m":    t.distance_m,
+        "direction_deg": t.direction,   # expose as direction_deg for consistency
+        "terminology":   TERMINOLOGY,
     }

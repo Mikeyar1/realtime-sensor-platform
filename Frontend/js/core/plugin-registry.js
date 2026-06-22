@@ -31,7 +31,7 @@ LabReplay.registerPlugin = function (descriptor) {
     return;
   }
   LabReplay._plugins[descriptor.id] = descriptor;
-  console.log(`[PluginRegistry] Registered plugin: "${descriptor.id}" → handles [${descriptor.streamTypes}]`);
+
 };
 
 /**

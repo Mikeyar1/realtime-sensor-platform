@@ -36,7 +36,7 @@ def _parse_channels(info) -> list[dict]:
     except ET.ParseError:
         pass
 
-    # Fallback — generic channel dicts if XML is missing or malformed
+    # Fallback — generic channel dicts if XML is missing
     return [{"label": f"ch_{i}", "unit": "", "type": ""} for i in range(channel_count)]
 
 
