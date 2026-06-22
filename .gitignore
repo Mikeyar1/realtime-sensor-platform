@@ -42,6 +42,12 @@ Data/
 total-recall/sessions/
 total-recall/*.db
 
+# ── Testing ───────────────────────────────────────────────────────────────────
+Testing/
+
+# ── Documentation / markdown ──────────────────────────────────────────────────
+*.md
+
 # ── Scratch / temporary work ──────────────────────────────────────────────────
 scratch/
 temp.py

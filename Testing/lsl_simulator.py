@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 lsl_simulator.py — Real-time Physiological & Behavioral LSL Stream Simulator.
 
