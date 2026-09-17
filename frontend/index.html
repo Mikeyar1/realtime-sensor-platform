@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LabReview — Human Performance Dashboard</title>
+  <meta name="description"
+    content="Live session monitoring and replay of physiological and behavioral data for VirTra-based training research." />
+
+  <!-- Design System -->
+  <link rel="stylesheet" href="css/variables.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+
+  <!-- Page CSS (feature-based) -->
+  <link rel="stylesheet" href="css/pages/topbar.css" />
+  <link rel="stylesheet" href="css/pages/live-intel.css" />
+
+  <!-- AAR Dashboard -->
+  <link rel="stylesheet" href="js/features/aar/aar-dashboard.css" />
+
+  <!-- ES module preloads — shared utilities (imported by app.js) -->
+  <link rel="modulepreload" href="js/shared/constants.js" />
+  <link rel="modulepreload" href="js/shared/format.js" />
+</head>
+
+<body>
+
+  <div id="app">
+
+    <header id="topbar-slot">
+      <!-- Populated by TopBarManager when a page activates -->
+    </header>
+
+    <div id="middle">
+
+      <!-- Sidebar -->
+      <aside id="sidebar">
+        <!-- Brand title -->
+        <div class="sidebar-brand">LabReview</div>
+
+        <!-- Navigation -->
+        <nav class="sidebar-nav">
+
+          <!-- LIVE group -->
+          <div class="sidebar-section-label">LIVE</div>
+
+          <div class="nav-item active" data-page="live-intel" id="nav-live-intel">
+            <span class="nav-dot"></span>
+            <span class="nav-label">Live Human Performance</span>
+          </div>
+
+        </nav>
+
+        <!-- Connected Streams accordion — populated by live-intel.js -->
+        <div class="sidebar-streams" id="sidebar-streams">
+
+          <button class="sidebar-streams__header" id="sidebar-streams-toggle" aria-expanded="true"
+            aria-controls="sidebar-streams-body">
+            <span class="sidebar-streams__title">Connected Streams</span>
+            <span class="sidebar-streams__chevron" id="sidebar-streams-chevron">▾</span>
+          </button>
+
+          <div class="sidebar-streams__body" id="sidebar-streams-body">
+            <div class="sidebar-stream-list" id="sidebar-stream-list">
+              <span class="sidebar-stream-empty">No streams detected.</span>
+            </div>
+          </div>
+
+        </div>
+
+      </aside>
+
+      <!-- Main Content -->
+      <main id="main-content">
+
+        <div class="page active" id="page-live-intel">
+          <!-- Populated by LiveIntelPage -->
+        </div>
+
+      </main>
+    </div>
+
+    <footer id="event-bar">
+
+      <div id="event-bar-handle" title="Drag to resize"></div>
+
+      <span id="timeline-start" style="display:none">00:00:00</span>
+      <span id="timeline-end" style="display:none">00:00:00</span>
+      <div id="timeline-track" style="display:none">
+        <div class="timeline-rail"></div>
+        <div class="timeline-progress" id="timeline-progress"></div>
+        <div class="timeline-head" id="timeline-head"></div>
+      </div>
+
+      <!-- Two-column event panel -->
+      <div id="event-columns">
+
+        <!-- LEFT: VirTra event log -->
+        <div id="virtra-panel">
+          <div class="panel-header">
+            <span class="panel-header-title">VirTra Events</span>
+          </div>
+          <div id="event-feed">
+            <span class="ticker-empty">Waiting for events.</span>
+          </div>
+        </div>
+
+        <!-- RIGHT: Speech-to-text -->
+        <div id="speech-panel">
+          <div class="panel-header">
+            <span class="panel-header-title">Speech</span>
+          </div>
+          <div id="speech-box">
+            <span id="speech-text" class="speech-utterance">—</span>
+            <span id="speech-time" class="speech-ts"></span>
+          </div>
+        </div>
+
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Scripts: core → pages -->
+
+  <!-- Core infrastructure -->
+  <script src="js/core/plugin-registry.js"></script>
+  <script src="js/core/event-bus.js"></script>
+  <script src="js/core/stream-router.js"></script>
+  <script src="js/core/mode-manager.js"></script>
+  <script src="js/core/sidebar.js"></script>
+  <script src="js/core/timeline.js"></script>
+  <script src="js/core/topbar-manager.js"></script>
+
+  <!-- Plugins -->
+  <script src="js/plugins/event-ticker.js"></script>
+
+  <!-- AAR Dashboard: router + task-type display modules -->
+  <!-- To add a new task type: create task-types/<name>.js and add one line here -->
+  <script src="js/features/aar/task-types/general.js"></script>
+  <script src="js/features/aar/task-types/gng.js"></script>
+  <script src="js/features/aar/task-types/pvt.js"></script>
+  <script src="js/features/aar/task-types/discrimination.js"></script>
+  <script src="js/features/aar/aar-dashboard.js"></script>
+
+  <!-- Config: stream display registry + drill metric card registry -->
+  <script src="js/config/stream_catalog.js"></script>
+  <script src="js/config/drill_metrics.js"></script>
+
+  <!-- Shared: metric card renderer -->
+  <script src="js/shared/metric-card-renderer.js"></script>
+
+  <!-- Page controllers -->
+  <script src="js/pages/live-intel.js"></script>
+
+  <!-- App bootstrap (must be last; type=module defers automatically) -->
+  <script type="module" src="js/app.js"></script>
+
+</body>
+
+</html>
