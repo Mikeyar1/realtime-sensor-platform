@@ -1,0 +1,175 @@
+# drill_registry.toml — Cognitive Attribute & Scenario Registry
+#
+# Maps VirTra "Scenario" field values (from Scenario Started events) to a
+# cognitive attribute. The Backend uses this to determine:
+#   1. Which cognitive attribute is active (and its drill_key for the UI)
+#   2. Which tracker to use (task_type → ATTRIBUTE_REGISTRY in cognitive_attributes/)
+#   3. Which metrics function to run (metric_module)
+#   4. What parameters to configure the tracker with (params)
+#   5. Which targets are go / no_go / ignore (for GNG-type attributes)
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# HOW TO ADD A NEW SCENARIO TO AN EXISTING COGNITIVE ATTRIBUTE
+#   1. Add the scenario name string to the `scenarios` list below.
+#      Match EXACTLY what appears in the VirTra "Scenario" metadata field.
+#   2. Done — no code changes needed.
+#
+#   If the scenario needs different timing than the attribute defaults:
+#   Add a [cognitive_attributes.<key>.scenario_params."<scenario name>"] block
+#   with only the values that differ (e.g. grace_window_ms = 300).
+#
+# HOW TO ADD A NEW COGNITIVE ATTRIBUTE
+#   1. Create backend/cognitive_attributes/<name>/tracker.py
+#   2. Create backend/cognitive_attributes/<name>/metrics.py
+#   3. Add one entry to ATTRIBUTE_REGISTRY in cognitive_attributes/__init__.py
+#   4. Add a [cognitive_attributes.<name>] section below.
+#   Done.
+#
+# SOURCE
+# Scenario names verified against 21 VirTra CSV files from Exercises 6-11
+# (Feb 2026 - Jul 2026)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ── General events captured for ALL cognitive attributes ──────────────────────
+#
+# These events are captured for every session regardless of cognitive attribute.
+# They provide the shared foundation for cross-attribute metrics and the event log.
+#
+# Actor appearance notes:
+#   "Actor Event" with category "FA - First Appearance" → actor first appeared
+#   "Actor IsVisible Changed" with IsVisible=True       → actor visibility toggled on
+#   Both are needed: FA for initial appearance, IsVisible for dynamic reappearance.
+#
+[general]
+events = [
+    # Scenario lifecycle
+    "Scenario Started",
+    "Scenario Stopped",
+    "Scenario Launching",
+    "Scenario Ready To Play",
+    "Scenario Paused",
+
+    # Shooting events
+    "Shot Fired",
+    "Shot Hit",
+    "Shot Miss",
+    "Unscored Hit",
+
+    # Target lifecycle
+    "Target Activated",
+    "Target Deactivated",
+    "New Target",
+    "Target Removed",
+
+    # Actor events
+    # Actor Event (category = "FA - First Appearance") → actor first appeared
+    "Actor Event",
+    # Actor IsVisible Changed (IsVisible=True) → actor visibility toggled on/off
+    "Actor IsVisible Changed",
+    # Actor State Changed → actor behavioral state transition
+    "Actor State Changed",
+]
+
+
+# ── Cognitive Attributes ──────────────────────────────────────────────────────
+
+
+[cognitive_attributes.pvt]
+label         = "Psychomotor Vigilance Task"
+task_type     = "PVT"                # → cognitive_attributes/pvt/tracker.py
+metric_module = "pvt"                # → cognitive_attributes/pvt/metrics.py
+description   = "Sustained attention assessment — trainee responds to visual stimuli as rapidly as possible."
+scenarios     = [
+    "PVT",
+    "LVL1_PVT_FITTS_ASSESSMENT",
+    "LVL 1 PVT FITTS ASSESSMENT",
+    "LVL1 PVT FITTS ASSESSMENT",
+    "PVT FITTS ASSESSMENT",
+    "Snake Drill",
+]
+# Target filtering for PVT.
+# valid_targets  = only these names open a trial (case-insensitive).
+#                  Empty list → accept any name not in ignore_targets.
+# ignore_targets = these names are ALWAYS skipped.
+#   Ivan       — is shot to START the drill, not a stimulus.
+#   fixation*  — fixation crosses between stimuli, not a stimulus.
+
+[cognitive_attributes.pvt.targets]
+valid_targets  = ["neutral"]
+ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)", "end_of_round_target"]
+
+# Default parameters for ALL PVT scenarios.
+# Override per-scenario with [cognitive_attributes.pvt.scenario_params."<name>"]
+[cognitive_attributes.pvt.params]
+# Lapse detection: multiplier applied to the session median RT.
+# lapse_threshold = median_rt × lapse_multiplier (e.g. 843 ms × 2.0 = 1686 ms).
+lapse_multiplier = 1.5
+
+
+[cognitive_attributes.inhibition_assessment]
+label         = "Inhibition Assessment"
+task_type     = "GNG"                # → cognitive_attributes/gng/tracker.py
+metric_module = "gng"                # → cognitive_attributes/gng/metrics.py
+description   = "Inhibitory control assessment — trainee must engage or withhold based on target type."
+scenarios     = [
+    "LVL 2 Go No Go",
+    "LVL 2 Inhibition Assessment",
+    "Engagement Drill (GNG)",
+]
+
+[cognitive_attributes.inhibition_assessment.targets]
+go     = ["Ivan"]
+no_go  = ["neutral"]
+ignore = ["fixation", "fixation (2)", "fixation (3)"]
+
+[cognitive_attributes.inhibition_assessment.params]
+late_shot_window_ms = 500    # ms after Target Removed to still accept a late Shot Fired
+
+
+[cognitive_attributes.behavioral_discrimination]
+label         = "Behavioral Discrimination"
+task_type     = "DISCRIMINATION"     # → cognitive_attributes/discrimination/tracker.py
+metric_module = "discrimination"     # → cognitive_attributes/discrimination/metrics.py
+description   = "Two-phase drill: PVT vigilance block, then threat/non-threat discrimination under time pressure."
+scenarios     = [
+    "Drill 3A (Single-Target Discrimination)",
+    "Drill 3B",
+]
+
+# Threat class is read from the target name suffix (*_threat / *_nonthreat),
+# verified against Drill 3A and Drill 3B captures — no per-name list needed.
+#   Ivan      — shot to START the drill, not a stimulus.
+#   fixation* — fixation crosses between stimuli.
+[cognitive_attributes.behavioral_discrimination.targets]
+pvt_targets    = ["neutral"]
+ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)"]
+
+[cognitive_attributes.behavioral_discrimination.params]
+# ms to wait after Target Deactivated for a late impact before scoring a withhold.
+grace_window_ms  = 200
+# PVT-phase lapse threshold = median RT × this.
+lapse_multiplier = 1.5
+
+
+[cognitive_attributes.marksmanship]
+label         = "Marksmanship"
+task_type     = "MARKSMANSHIP"       # → not yet in ATTRIBUTE_REGISTRY; events captured only
+metric_module = "marksmanship"       # → not yet implemented; returns {} at scenario end
+description   = "Shooting accuracy and qualification assessment across distance and speed conditions."
+scenarios     = [
+    "Running Man",
+    "Pressure Drill",
+    "Pistol Qualification Stage 1",
+]
+lane_start_events = ["Start Of Pistol Qualification Stage 1", "Start Of Boresight"]
+lane_stop_events  = ["Stopped"]
+
+
+# ── Calibration / Non-scored ──────────────────────────────────────────────────
+# Scenarios listed here are explicitly recognized as non-training.
+# The Backend logs "ignoring known non-drill scenario" and starts no session.
+# Any scenario NOT listed in cognitive_attributes.* OR calibration is also
+# silently ignored.
+[calibration]
+scenarios = ["Boresight"]

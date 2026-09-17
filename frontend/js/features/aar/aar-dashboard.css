@@ -1,0 +1,543 @@
+/**
+ * aar-dashboard.css
+ *
+ * Styles for the After Action Review card layout.
+ * Used by all task-type modules (GNG, PVT, General).
+ *
+ * Structure:
+ *   .aar-panel          — full panel container
+ *   .aar-header         — scenario name + badge
+ *   .aar-section        — labelled metric group
+ *   .aar-grid           — responsive card grid (2 or 3 col)
+ *   .aar-card           — individual metric card
+ *   .aar-info-btn       — ℹ hover tooltip trigger
+ *   .aar-alert-row      — prominent alert row (false alarm warning etc.)
+ *   .aar-chart-wrap     — chart container (speed-accuracy, RT trend)
+ *   .aar-phys-section   — physiological signals placeholder
+ *   .aar-waiting        — waiting state before scenario starts
+ */
+
+/* ── Panel shell ─────────────────────────────────────────────────────────── */
+
+.aar-panel {
+  display:        flex;
+  flex-direction: column;
+  gap:            var(--space-xl);
+  width:          100%;   /* stretch to fill whatever container it's mounted in */
+  /* No internal padding — li-section already provides horizontal padding */
+}
+
+/* ── Waiting state ───────────────────────────────────────────────────────── */
+
+.aar-waiting {
+  display:         flex;
+  flex-direction:  column;
+  align-items:     center;
+  justify-content: center;
+  gap:             var(--space-sm);
+  height:          100%;
+  color:           var(--text-muted);
+}
+
+.aar-waiting-label {
+  font-size:   1.2rem;
+  font-weight: 600;
+  color:       var(--text-secondary);
+}
+
+.aar-waiting-sub {
+  font-size: 0.875rem;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+.aar-header {
+  display:     flex;
+  align-items: center;
+  gap:         var(--space-md);
+  flex-wrap:   wrap;
+}
+
+.aar-scenario-name {
+  font-size:   1.1rem;
+  font-weight: 700;
+  color:       var(--text-primary);
+  flex:        1;
+}
+
+.aar-task-badge {
+  font-size:        0.7rem;
+  font-weight:      700;
+  letter-spacing:   0.08em;
+  text-transform:   uppercase;
+  padding:          3px 10px;
+  border-radius:    999px;
+  background:       var(--accent-blue-dim, rgba(96,165,250,0.15));
+  color:            var(--accent-blue, #60a5fa);
+  border:           1px solid var(--accent-blue-dim, rgba(96,165,250,0.25));
+  white-space:      nowrap;
+}
+
+.aar-task-badge--gng   { background: rgba(167,139,250,0.15); color: #a78bfa; border-color: rgba(167,139,250,0.25); }
+.aar-task-badge--pvt   { background: rgba(52,211,153,0.15);  color: #34d399; border-color: rgba(52,211,153,0.25);  }
+.aar-task-badge--general { background: rgba(156,163,175,0.12); color: #9ca3af; border-color: rgba(156,163,175,0.2); }
+
+/* ── Section label ───────────────────────────────────────────────────────── */
+
+.aar-section {
+  display:        flex;
+  flex-direction: column;
+  gap:            var(--space-sm);
+}
+
+/* Visual divider between consecutive sections (Session Context / Performance / Physiological) */
+.aar-section + .aar-section {
+  padding-top:  var(--space-lg);
+  border-top:   1px solid var(--border-medium, #CDD1D9);
+  margin-top:   var(--space-xs, 4px);
+}
+
+.aar-section-label {
+  font-size:      11.5px;
+  font-weight:    700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color:          var(--text-secondary);
+  padding-bottom: 6px;
+  border-bottom:  1px solid var(--border-medium, #CDD1D9);
+  margin-bottom:  4px;
+}
+
+/* ── Card grid ───────────────────────────────────────────────────────────── */
+
+.aar-grid {
+  display:               grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap:                   var(--space-sm);
+}
+
+.aar-grid--3col {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+@media (max-width: 700px) {
+  .aar-grid,
+  .aar-grid--3col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Metric card ─────────────────────────────────────────────────────────── */
+
+.aar-card {
+  position:        relative;
+  background:      var(--surface-card, rgba(255,255,255,0.04));
+  border:          1px solid var(--border-subtle, rgba(255,255,255,0.07));
+  border-radius:   var(--radius-md, 10px);
+  padding:         var(--space-md) var(--space-md) var(--space-sm);
+  display:         flex;
+  flex-direction:  column;
+  justify-content: space-between;
+  gap:             4px;
+  min-width:       0;      /* Crucial for CSS Grid tracks so contents cannot blow out card width */
+  transition:      border-color 0.2s, background 0.2s;
+}
+
+.aar-card--flash {
+  animation: aar-flash 0.35s ease-out;
+}
+
+@keyframes aar-flash {
+  0%   { background: var(--accent-flash, rgba(96,165,250,0.18)); }
+  100% { background: var(--surface-card, rgba(255,255,255,0.04)); }
+}
+
+/* State variants */
+.aar-card--good {
+  border-color: rgba(52, 211, 153, 0.35);
+  background:   rgba(52, 211, 153, 0.05);
+}
+
+.aar-card--alert {
+  border-color: rgba(251, 113, 133, 0.35);
+  background:   rgba(251, 113, 133, 0.05);
+}
+
+.aar-card--warn {
+  border-color: rgba(251, 191, 36, 0.35);
+  background:   rgba(251, 191, 36, 0.05);
+}
+
+.aar-card--neutral {
+  border-color: rgba(156, 163, 175, 0.2);
+}
+
+/* Card elements */
+.aar-card-value {
+  font-family:    var(--font-mono);   /* Consolas/Monaco for numerical metrics */
+  font-size:      1.35rem;            /* Down from 1.5rem for cleaner visual balance */
+  font-weight:    600;
+  color:          var(--text-primary);
+  line-height:    1.1;
+  max-width:      100%;
+  min-width:      0;
+  overflow-wrap:  anywhere;           /* Ensures unbroken tokens wrap within card */
+  word-break:     break-word;
+}
+
+/* Text-based context values (Scenario name, Simulator, Weapon Type, etc.) */
+.aar-card-value--text,
+[id*="-ctx-"],
+.aar-card--text .aar-card-value {
+  font-family:    var(--font-family); /* Use clean UI font (Segoe UI/Arial) instead of wide monospace */
+  font-size:      0.95rem;            /* Proportional font size for long descriptive strings */
+  font-weight:    600;
+  line-height:    1.25;
+  color:          var(--text-primary);
+  padding-right:  20px;               /* Clearance for the top-right ℹ info button */
+  overflow-wrap:  anywhere;           /* Breaks on underscores and long alphanumeric tokens */
+  word-break:     break-word;
+}
+
+.aar-card-label {
+  font-size:      0.78rem;
+  font-weight:    600;
+  color:          var(--text-secondary);
+  overflow-wrap:  anywhere;
+}
+
+.aar-card-sub {
+  font-size:      0.72rem;
+  color:          var(--text-muted);
+  overflow-wrap:  anywhere;
+}
+
+/* ── Info button + tooltip ───────────────────────────────────────────────── */
+
+.aar-info-btn {
+  position:      absolute;
+  top:           8px;
+  right:         8px;
+  width:         18px;
+  height:        18px;
+  border-radius: 50%;
+  border:        1px solid var(--border-subtle, rgba(255,255,255,0.1));
+  background:    transparent;
+  color:         var(--text-muted);
+  font-size:     0.65rem;
+  font-weight:   700;
+  cursor:        default;
+  display:       flex;
+  align-items:   center;
+  justify-content: center;
+  transition:    border-color 0.15s, color 0.15s;
+}
+
+.aar-info-btn:hover {
+  border-color: var(--text-secondary);
+  color:        var(--text-secondary);
+}
+
+/* Tooltip */
+.aar-info-btn::after {
+  content:          attr(data-tip);
+  position:         absolute;
+  bottom:           calc(100% + 6px);
+  right:            0;
+  min-width:        200px;
+  max-width:        280px;
+  background:       var(--surface-overlay, rgba(15,15,25,0.95));
+  border:           1px solid var(--border-subtle, rgba(255,255,255,0.12));
+  border-radius:    var(--radius-sm, 6px);
+  padding:          8px 10px;
+  font-size:        0.72rem;
+  line-height:      1.5;
+  color:            var(--text-secondary);
+  white-space:      normal;
+  pointer-events:   none;
+  opacity:          0;
+  transform:        translateY(4px);
+  transition:       opacity 0.15s, transform 0.15s;
+  z-index:          100;
+}
+
+.aar-info-btn:hover::after {
+  opacity:   1;
+  transform: translateY(0);
+}
+
+/* ── Alert row ───────────────────────────────────────────────────────────── */
+
+.aar-alert-row {
+  display:       flex;
+  align-items:   center;
+  gap:           var(--space-sm);
+  padding:       var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md, 10px);
+  border:        1px solid rgba(251, 113, 133, 0.35);
+  background:    rgba(251, 113, 133, 0.07);
+  font-size:     0.82rem;
+  color:         var(--text-secondary);
+}
+
+.aar-alert-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.aar-alert-count {
+  font-weight: 700;
+  color:       #fb7185;
+}
+
+/* ── Chart container ─────────────────────────────────────────────────────── */
+
+.aar-chart-wrap {
+  background:    var(--surface-card, rgba(255,255,255,0.04));
+  border:        1px solid var(--border-subtle, rgba(255,255,255,0.07));
+  border-radius: var(--radius-md, 10px);
+  padding:       var(--space-md);
+  display:       flex;
+  flex-direction: column;
+  gap:           var(--space-sm);
+}
+
+.aar-chart-title {
+  font-size:   0.75rem;
+  font-weight: 600;
+  color:       var(--text-secondary);
+}
+
+.aar-chart-legend {
+  display:  flex;
+  gap:      var(--space-md);
+  flex-wrap: wrap;
+}
+
+.aar-legend-item {
+  display:     flex;
+  align-items: center;
+  gap:         5px;
+  font-size:   0.7rem;
+  color:       var(--text-muted);
+}
+
+.aar-legend-dot {
+  width:         8px;
+  height:        8px;
+  border-radius: 50%;
+  flex-shrink:   0;
+}
+
+.aar-chart-canvas {
+  width:  100%;
+  height: 140px;
+  display: block;
+}
+
+/* ── Physiological section placeholder ──────────────────────────────────── */
+
+.aar-phys-section {
+  border-top:  1px solid var(--border-subtle, rgba(255,255,255,0.06));
+  padding-top: var(--space-md);
+  display:     flex;
+  flex-direction: column;
+  gap:         var(--space-sm);
+}
+
+.aar-phys-label {
+  font-size:      0.7rem;
+  font-weight:    700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color:          var(--text-muted);
+}
+
+.aar-phys-grid {
+  display:               grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap:                   var(--space-sm);
+}
+
+.aar-phys-card {
+  background:    var(--surface-card, rgba(255,255,255,0.03));
+  border:        1px solid var(--border-subtle, rgba(255,255,255,0.06));
+  border-radius: var(--radius-sm, 6px);
+  padding:       var(--space-sm);
+  text-align:    center;
+}
+
+.aar-phys-value {
+  font-size:   1.2rem;
+  font-weight: 700;
+  color:       var(--text-primary);
+}
+
+.aar-phys-name {
+  font-size: 0.7rem;
+  color:     var(--text-secondary);
+}
+
+.aar-phys-unit {
+  font-size: 0.65rem;
+  color:     var(--text-muted);
+}
+
+/* ── General module: event summary table ─────────────────────────────────── */
+
+.aar-gen-event-table {
+  display:        flex;
+  flex-direction: column;
+  gap:            2px;
+  border-radius:  var(--radius-md, 10px);
+  overflow:       hidden;
+  border:         1px solid var(--border-subtle, rgba(255,255,255,0.07));
+}
+
+.aar-gen-event-row {
+  display:         flex;
+  justify-content: space-between;
+  align-items:     center;
+  padding:         7px 12px;
+  background:      var(--surface-card, rgba(255,255,255,0.03));
+  border-bottom:   1px solid var(--border-subtle, rgba(255,255,255,0.05));
+  transition:      background 0.15s;
+}
+
+.aar-gen-event-row:last-child {
+  border-bottom: none;
+}
+
+.aar-gen-event-row:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+.aar-gen-event-name {
+  font-size:  0.82rem;
+  color:      var(--text-secondary);
+}
+
+.aar-gen-event-count {
+  font-size:   0.82rem;
+  font-weight: 700;
+  color:       var(--text-primary);
+  background:  rgba(255,255,255,0.06);
+  border:      1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+  padding:     2px 9px;
+  min-width:   28px;
+  text-align:  center;
+}
+
+/* ── General module: catch-all key-value rows ───────────────────────────── */
+
+.aar-gen-kv-list {
+  display:        flex;
+  flex-direction: column;
+  gap:            1px;
+}
+
+.aar-gen-kv-row {
+  display:         flex;
+  justify-content: space-between;
+  align-items:     center;
+  padding:         6px 4px;
+  border-bottom:   1px solid var(--border-subtle, rgba(255,255,255,0.04));
+}
+
+.aar-gen-kv-row:last-child {
+  border-bottom: none;
+}
+
+.aar-gen-kv-label {
+  font-size: 0.82rem;
+  color:     var(--text-secondary);
+}
+
+.aar-gen-kv-value {
+  font-size:   0.82rem;
+  font-weight: 600;
+  color:       var(--text-primary);
+}
+
+/* ── Export row ──────────────────────────────────────────────────────────── */
+
+.aar-export-row {
+  display:     flex;
+  align-items: center;
+  gap:         var(--space-md);
+  padding-top: var(--space-sm);
+}
+
+.aar-export-btn {
+  background:    var(--surface-card, rgba(255,255,255,0.06));
+  border:        1px solid var(--border-subtle, rgba(255,255,255,0.12));
+  border-radius: var(--radius-sm, 6px);
+  color:         var(--text-secondary);
+  font-size:     0.8rem;
+  padding:       6px 14px;
+  cursor:        pointer;
+  transition:    background 0.15s, color 0.15s;
+}
+
+.aar-export-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color:      var(--text-primary);
+}
+
+.aar-export-hint {
+  font-size: 0.75rem;
+  color:     var(--text-muted);
+}
+
+/* ── General module: live event feed ─────────────────────────────────────── */
+
+.aar-gen-feed {
+  display:        flex;
+  flex-direction: column;
+  gap:            4px;
+  max-height:     220px;
+  overflow-y:     auto;
+  border:         1px solid var(--border-subtle, rgba(255,255,255,0.07));
+  border-radius:  var(--radius-md, 10px);
+  padding:        6px;
+  background:     var(--surface-card, rgba(255,255,255,0.02));
+}
+
+.aar-gen-feed-item {
+  display:       flex;
+  align-items:   center;
+  gap:           8px;
+  padding:       5px 8px;
+  border-radius: 6px;
+  background:    rgba(255,255,255,0.02);
+  font-size:     0.78rem;
+}
+
+.aar-gen-feed-time {
+  color:       var(--text-muted);
+  font-family: monospace;
+  font-size:   0.72rem;
+  min-width:   48px;
+}
+
+.aar-gen-feed-badge {
+  padding:       1px 6px;
+  border-radius: 4px;
+  font-weight:   600;
+  font-size:     0.7rem;
+  background:    rgba(255,255,255,0.08);
+}
+
+.aar-gen-feed-badge--shot   { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+.aar-gen-feed-badge--hit    { background: rgba(52, 211, 153, 0.2);  color: #34d399; }
+.aar-gen-feed-badge--miss   { background: rgba(239, 68, 68, 0.2);   color: #f87171; }
+.aar-gen-feed-badge--target { background: rgba(99, 102, 241, 0.2);  color: #818cf8; }
+
+.aar-gen-feed-desc {
+  color:         var(--text-secondary);
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+  flex:          1;
+}
