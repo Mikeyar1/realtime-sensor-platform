@@ -1,22 +1,11 @@
-# =============================================================================
-# LabReplay — Root .gitignore
-# =============================================================================
-
-# ── macOS system files ────────────────────────────────────────────────────────
+# macOS system files 
 .DS_Store
-.DS_Store?
 ._*
-.Spotlight-V100
-.Trashes
 
-# ── Editor / IDE ──────────────────────────────────────────────────────────────
+# Editor / IDE 
 .vscode/
-.idea/
-*.swp
-*.swo
-*~
 
-# ── Python ────────────────────────────────────────────────────────────────────
+# Python 
 __pycache__/
 *.py[oc]
 *.pyo
@@ -28,34 +17,14 @@ wheels/
 .uv/
 .uv-cache/
 
-# ── Virtual environments ──────────────────────────────────────────────────────
+# Virtual environments/environment variables
 .venv/
-venv/
-env/
 .env
-.env.*
 
-# ── Session / participant data — never commit raw recordings ──────────────────
-Data/
-!Data/images/
-!Data/images/platform.png
-total-recall/sessions/
-total-recall/*.db
+# Session/data 
+data/
+liveSessions
+validate_data/
 
-# ── Testing ───────────────────────────────────────────────────────────────────
-Testing/
-
-# ── Documentation / markdown ──────────────────────────────────────────────────
-*.md
-
-# ── Scratch / temporary work ──────────────────────────────────────────────────
-scratch/
-temp.py
-*.tmp
-*.log
-
-# ── Binary / generated artifacts ─────────────────────────────────────────────
-*.docx
-learning/*.o
-learning/a.out
-learning/server
+# Miscellaneous
+docs/
