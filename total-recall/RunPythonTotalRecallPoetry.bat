@@ -1,1 +1,0 @@
-poetry run python guiapp.py config.toml
