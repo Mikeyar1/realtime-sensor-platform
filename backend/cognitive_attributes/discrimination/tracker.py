@@ -80,6 +80,10 @@ class _TrialState:
     pending_shot_id: str   = ""
     pending_shot_ts: float = 0.0
     generation:      int   = 0      # bumped on reposition to void a pending grace callback
+    deactivated_at:  Optional[float] = None  # set when Target Deactivated starts the grace window
+    first_activated_at: Optional[float] = None  # RT origin fallback — never overwritten, guards against negative RT
+    last_distance:   Optional[str] = None    # "Distance" at last Activated — detects a real move
+    last_direction:  Optional[str] = None    # "Direction" at last Activated — detects a real move
 
 
 @dataclass
@@ -97,6 +101,22 @@ class CompletedDiscriminationTrial:
     shot_at:         Optional[float]
 
 
+def _rt_from(trial: "_TrialState", shot_ts: float) -> float:
+    """
+    RT can never be negative — a shot cannot precede the stimulus it responded to.
+    A negative/zero result here means a same-ID reposition event was processed
+    out of true chronological order relative to its own Shot Fired (VirTra
+    occasionally delivers events slightly out of order), corrupting the RT
+    origin. Fall back to the trial's original activation in that case.
+    """
+    rt_ms = (shot_ts - trial.activated_at) * 1000.0
+    if rt_ms <= 0 and trial.first_activated_at:
+        fallback_rt_ms = (shot_ts - trial.first_activated_at) * 1000.0
+        if fallback_rt_ms > 0:
+            return fallback_rt_ms
+    return rt_ms
+
+
 class DiscriminationTracker:
     """
     Real-time tracker for two-phase PVT → threat/non-threat discrimination drills.
@@ -107,7 +127,7 @@ class DiscriminationTracker:
 
     _DEFAULT_IGNORE_TARGETS:   list  = ["ivan", "fixation", "fixation (2)", "fixation (3)"]
     _DEFAULT_PVT_TARGETS:      list  = ["neutral"]
-    _DEFAULT_GRACE_WINDOW_MS:  int   = 200
+    _DEFAULT_GRACE_WINDOW_MS:  int   = 50
     _DEFAULT_LAPSE_MULTIPLIER: float = 2.0
 
     def __init__(self, broadcast_fn, loop: asyncio.AbstractEventLoop):
@@ -231,10 +251,33 @@ class DiscriminationTracker:
         phase, target_class = resolved
 
         if target_id in self._active:
-            # Repositioning — reset the RT origin and void any in-flight grace callback.
-            self._active[target_id].activated_at = ts
-            self._active[target_id].generation  += 1
-            return
+            existing = self._active[target_id]
+            stale = (
+                existing.deactivated_at is not None
+                and (ts - existing.deactivated_at) > self._grace_window_s
+            )
+            if not stale:
+                # VirTra re-announces the same placement (Distance/Direction unchanged)
+                # far more often than a target truly repositions — only move the RT
+                # origin when the position actually changed.
+                moved = (
+                    meta.get("Distance") != existing.last_distance
+                    or meta.get("Direction") != existing.last_direction
+                )
+                if moved:
+                    existing.activated_at   = ts
+                    existing.last_distance  = meta.get("Distance")
+                    existing.last_direction = meta.get("Direction")
+                existing.deactivated_at = None
+                existing.generation     += 1
+                return
+            # The previous presentation's grace window has already elapsed (by event
+            # time, not wall-clock time) — this activation is a genuinely new trial,
+            # not a reposition. Resolve the stale trial now instead of silently
+            # merging it away (that merge used to erase misses/false-alarms and
+            # misattribute their outcome to whatever this new presentation becomes).
+            del self._active[target_id]
+            self._resolve_now(existing)
 
         self._trial_counter += 1
         self._active[target_id] = _TrialState(
@@ -244,6 +287,9 @@ class DiscriminationTracker:
             phase        = phase,
             target_class = target_class,
             activated_at = ts,
+            first_activated_at = ts,
+            last_distance  = meta.get("Distance"),
+            last_direction = meta.get("Direction"),
         )
         print(
             f"[DiscriminationTracker] Trial {self._trial_counter:3d} OPENED | "
@@ -278,7 +324,7 @@ class DiscriminationTracker:
             return  # fixation cross, Ivan, or an already-closed trial
 
         shot_ts = self._shot_timestamps.get(shot_id, ts)
-        rt_ms   = (shot_ts - trial.activated_at) * 1000.0
+        rt_ms   = _rt_from(trial, shot_ts)
 
         if trial.phase == PHASE_DISC:
             result = HIT if trial.target_class == "threat" else FALSE_ALARM
@@ -296,6 +342,7 @@ class DiscriminationTracker:
         trial = self._active.get(target_id)
         if trial is None:
             return
+        trial.deactivated_at = ts
 
         self._loop.call_soon_threadsafe(
             lambda tid=target_id, tnum=trial.trial_number, gen=trial.generation:
@@ -306,6 +353,33 @@ class DiscriminationTracker:
 
     # Grace window
 
+    def _resolve_now(self, trial: "_TrialState"):
+        """
+        Synchronously resolve a trial as a non-engagement (no impact arrived).
+        Shared by the wall-clock grace callback and the event-time staleness
+        check in _on_target_activated (the latter fires when a same-ID target
+        reactivates after the grace window has already elapsed by event time,
+        which the wall-clock timer may not have caught up to yet).
+        """
+        if trial.phase == PHASE_DISC:
+            # No impact on this target → the trainee withheld.
+            result  = MISS if trial.target_class == "threat" else CORRECT_REJECTION
+            rt_ms   = None
+            shot_ts = None
+            shot_id = None
+        elif trial.pending_shot_ts:
+            result  = MISS          # fired, round did not connect
+            rt_ms   = _rt_from(trial, trial.pending_shot_ts)
+            shot_ts = trial.pending_shot_ts
+            shot_id = trial.pending_shot_id or None
+        else:
+            result  = OMISSION      # no trigger pull at all
+            rt_ms   = None
+            shot_ts = None
+            shot_id = None
+
+        self._close(trial, rt_ms, result, shot_id, shot_ts)
+
     async def _resolve_after_grace(self, target_id: str, trial_number: int, generation: int):
         """Close the trial as a non-engagement if no impact landed during the window."""
         await asyncio.sleep(self._grace_window_s)
@@ -313,29 +387,12 @@ class DiscriminationTracker:
         with self._lock:
             trial = self._active.get(target_id)
             if trial is None or trial.trial_number != trial_number:
-                return  # already closed by an impact
+                return  # already closed by an impact (or resolved by the staleness check)
             if trial.generation != generation:
                 return  # target reappeared during the window — a later grace will resolve it
 
-            if trial.phase == PHASE_DISC:
-                # No impact on this target → the trainee withheld.
-                result  = MISS if trial.target_class == "threat" else CORRECT_REJECTION
-                rt_ms   = None
-                shot_ts = None
-                shot_id = None
-            elif trial.pending_shot_ts:
-                result  = MISS          # fired, round did not connect
-                rt_ms   = (trial.pending_shot_ts - trial.activated_at) * 1000.0
-                shot_ts = trial.pending_shot_ts
-                shot_id = trial.pending_shot_id or None
-            else:
-                result  = OMISSION      # no trigger pull at all
-                rt_ms   = None
-                shot_ts = None
-                shot_id = None
-
             del self._active[target_id]
-            self._close(trial, rt_ms, result, shot_id, shot_ts)
+            self._resolve_now(trial)
 
     # Trial completion
 

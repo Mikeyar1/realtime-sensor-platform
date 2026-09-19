@@ -20,7 +20,7 @@ DESIGN NOTES
     VirTra sends "Target Deactivated" ~18 ms before the corresponding
     "Shot Hit" for the same physical trigger pull. We must not finalize a
     trial as an omission immediately on Deactivated; instead we hold the
-    trial in a 'grace' state for grace_window_ms (default 200 ms). If
+    trial in a 'grace' state for grace_window_ms (default 50 ms). If
     "Shot Hit" arrives before the window expires the trial is closed as a
     hit; otherwise it is closed as an omission.
 
@@ -40,7 +40,7 @@ CONFIGURABLE PARAMETERS (drill_registry.toml [cognitive_attributes.pvt.params])
                              Empty → accept any target not in ignore_targets.
   ignore_targets  list[str]  Names always skipped (Ivan, fixation…).
   grace_window_ms int        ms to wait after Target Deactivated for a late
-                             Shot Hit. Default 200 ms.
+                             Shot Hit. Default 50 ms.
 """
 
 import asyncio
@@ -60,10 +60,14 @@ class _PvtTrialState:
     trial_number:     int
     target_id:        str
     target_name:      str
-    activated_at:     float          # RT origin — updated on repositioning
+    activated_at:     float          # RT origin — updated only on a genuine reposition
+    first_activated_at: float = 0.0 # RT origin fallback — never overwritten, guards against negative RT
     in_grace:         bool  = False  # True after Target Deactivated, awaiting Shot Hit
     pending_shot_id:  str   = ""     # ShotID if Shot Fired but no Unscored Hit yet
     pending_shot_ts:  float = 0.0    # Shot Fired timestamp (0.0 = not yet fired)
+    deactivated_at:   Optional[float] = None  # set when Target Deactivated starts the grace window
+    last_distance:    Optional[str] = None    # "Distance" at last Activated — detects a real move
+    last_direction:   Optional[str] = None    # "Direction" at last Activated — detects a real move
 
 
 @dataclass
@@ -78,6 +82,22 @@ class CompletedPvtTrial:
     activated_at: float
     shot_at:      Optional[float]
     radial_error_cm: Optional[float] = None  # None for miss/omission (no impact point)
+
+
+def _rt_from(trial: "_PvtTrialState", shot_ts: float) -> float:
+    """
+    RT can never be negative — a shot cannot precede the stimulus it responded to.
+    A negative/zero result here means a same-ID reposition event was processed
+    out of true chronological order relative to its own Shot Fired (VirTra
+    occasionally delivers events slightly out of order), corrupting the RT
+    origin. Fall back to the trial's original activation in that case.
+    """
+    rt_ms = (shot_ts - trial.activated_at) * 1000.0
+    if rt_ms <= 0 and trial.first_activated_at:
+        fallback_rt_ms = (shot_ts - trial.first_activated_at) * 1000.0
+        if fallback_rt_ms > 0:
+            return fallback_rt_ms
+    return rt_ms
 
 
 def _parse_local_hit_radial_cm(meta: dict) -> Optional[float]:
@@ -106,7 +126,7 @@ class PvtTracker:
 
     _DEFAULT_VALID_TARGETS:   list = []
     _DEFAULT_IGNORE_TARGETS:  list = ["fixation", "fixation (2)", "fixation (3)", "Ivan"]
-    _DEFAULT_GRACE_WINDOW_MS: int  = 200   # VirTra delay is ~18 ms; 200 ms gives safe margin
+    _DEFAULT_GRACE_WINDOW_MS: int  = 50    # VirTra delay is ~18 ms; 50 ms gives safe margin
     _DEFAULT_LAPSE_MULTIPLIER: float = 2.0 # lapse threshold = session median RT × this
 
     def __init__(self, broadcast_fn, loop: asyncio.AbstractEventLoop):
@@ -242,18 +262,42 @@ class PvtTracker:
             return
 
         if target_id in self._active:
-            # Repositioning — update RT origin
-            self._active[target_id].activated_at = ts
-            print(f"[PvtTracker] Trial {self._active[target_id].trial_number:3d} | repositioned → RT origin={ts:.3f}")
-        else:
-            self._trial_counter += 1
-            self._active[target_id] = _PvtTrialState(
-                trial_number = self._trial_counter,
-                target_id    = target_id,
-                target_name  = target_name,
-                activated_at = ts,
+            existing = self._active[target_id]
+            stale = (
+                existing.deactivated_at is not None
+                and (ts - existing.deactivated_at) > self._grace_window_s
             )
-            print(f"[PvtTracker] Trial {self._trial_counter:3d} OPENED | target={target_name!r} id={target_id!r}")
+            if not stale:
+                # VirTra re-announces the same placement (Distance/Direction unchanged)
+                # far more often than a target truly repositions — only move the RT
+                # origin when the position actually changed.
+                moved = (
+                    meta.get("Distance") != existing.last_distance
+                    or meta.get("Direction") != existing.last_direction
+                )
+                if moved:
+                    existing.activated_at   = ts
+                    existing.last_distance  = meta.get("Distance")
+                    existing.last_direction = meta.get("Direction")
+                    print(f"[PvtTracker] Trial {existing.trial_number:3d} | repositioned → RT origin={ts:.3f}")
+                existing.deactivated_at = None
+                return
+            # Previous presentation's grace window already elapsed by event time —
+            # this is a new trial, not a reposition. Resolve the stale one first.
+            del self._active[target_id]
+            self._resolve_now(existing)
+
+        self._trial_counter += 1
+        self._active[target_id] = _PvtTrialState(
+            trial_number = self._trial_counter,
+            target_id    = target_id,
+            target_name  = target_name,
+            activated_at = ts,
+            first_activated_at = ts,
+            last_distance  = meta.get("Distance"),
+            last_direction = meta.get("Direction"),
+        )
+        print(f"[PvtTracker] Trial {self._trial_counter:3d} OPENED | target={target_name!r} id={target_id!r}")
 
     def _on_shot_fired(self, ts: float, meta: dict):
         """
@@ -295,7 +339,7 @@ class PvtTracker:
 
         # Use Shot Fired timestamp for RT if available (more precise)
         shot_ts = self._shot_timestamps.get(shot_id, ts)
-        rt_ms   = (shot_ts - trial.activated_at) * 1000.0
+        rt_ms   = _rt_from(trial, shot_ts)
         result  = "hit"
 
         completed = CompletedPvtTrial(
@@ -328,6 +372,7 @@ class PvtTracker:
             return  # Not a tracked stimulus or already closed
 
         trial.in_grace = True  # Mark so we know it's pending resolution
+        trial.deactivated_at = ts
 
         # Schedule grace-window resolution on the asyncio loop
         self._loop.call_soon_threadsafe(
@@ -342,6 +387,41 @@ class PvtTracker:
         )
 
     # Grace window
+
+    def _resolve_now(self, trial: "_PvtTrialState"):
+        """
+        Synchronously resolve a trial as miss/omission (no hit arrived).
+        Shared by the wall-clock grace callback and the event-time staleness
+        check in _on_target_activated.
+        """
+        if trial.pending_shot_ts:
+            # They pulled the trigger but the bullet didn't connect with the target
+            rt_ms   = _rt_from(trial, trial.pending_shot_ts)
+            result  = "miss"
+            shot_ts = trial.pending_shot_ts
+            shot_id = trial.pending_shot_id or None
+            print(f"[PvtTracker] Trial {trial.trial_number:3d} | MISS (fired RT={rt_ms:.0f}ms, no hit)")
+        else:
+            # No trigger pull at all → omission
+            rt_ms   = None
+            result  = "omission"
+            shot_ts = None
+            shot_id = None
+            print(f"[PvtTracker] Trial {trial.trial_number:3d} | OMISSION (no response)")
+
+        completed = CompletedPvtTrial(
+            trial_number = trial.trial_number,
+            target_id    = trial.target_id,
+            target_name  = trial.target_name,
+            rt_ms        = rt_ms,
+            result       = result,
+            shot_id      = shot_id,
+            activated_at = trial.activated_at,
+            shot_at      = shot_ts,
+        )
+
+        self._completed.append(completed)
+        self._broadcast_update(completed)
 
     async def _resolve_after_grace(self, target_id: str, trial_number: int):
         """
@@ -360,35 +440,8 @@ class PvtTracker:
             if trial is None or trial.trial_number != trial_number:
                 return
 
-            if trial.pending_shot_ts:
-                # They pulled the trigger but the bullet didn't connect with the target
-                rt_ms  = (trial.pending_shot_ts - trial.activated_at) * 1000.0
-                result = "miss"
-                shot_ts = trial.pending_shot_ts
-                shot_id = trial.pending_shot_id or None
-                print(f"[PvtTracker] Trial {trial.trial_number:3d} | MISS (fired RT={rt_ms:.0f}ms, no hit)")
-            else:
-                # No trigger pull at all → omission
-                rt_ms   = None
-                result  = "omission"
-                shot_ts = None
-                shot_id = None
-                print(f"[PvtTracker] Trial {trial.trial_number:3d} | OMISSION (no response)")
-
-            completed = CompletedPvtTrial(
-                trial_number = trial.trial_number,
-                target_id    = trial.target_id,
-                target_name  = trial.target_name,
-                rt_ms        = rt_ms,
-                result       = result,
-                shot_id      = shot_id,
-                activated_at = trial.activated_at,
-                shot_at      = shot_ts,
-            )
-
             del self._active[target_id]
-            self._completed.append(completed)
-            self._broadcast_update(completed)
+            self._resolve_now(trial)
 
     #  Running metrics
 

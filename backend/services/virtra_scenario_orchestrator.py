@@ -200,7 +200,7 @@ class VirTraScenarioOrchestrator:
         # The tracker decides internally which event types it cares about.
         _TRIAL_EVENTS = (
             "Target Activated", "Target Deactivated", "Target Removed",
-            "Shot Fired", "Shot Hit", "Unscored Hit",
+            "Shot Fired", "Shot Hit", "Unscored Hit", "Shot Miss",
         )
         if self._active_tracker is not None and event_type in _TRIAL_EVENTS:
             self._active_tracker.on_virtra_event(event_type, timestamp, metadata_dict)
