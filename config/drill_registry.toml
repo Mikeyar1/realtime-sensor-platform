@@ -107,24 +107,18 @@ ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)", "end_of_ro
 lapse_multiplier = 1.5
 
 
-[cognitive_attributes.inhibition_assessment]
-label         = "Inhibition Assessment"
-task_type     = "GNG"                # → cognitive_attributes/gng/tracker.py
-metric_module = "gng"                # → cognitive_attributes/gng/metrics.py
-description   = "Inhibitory control assessment — trainee must engage or withhold based on target type."
-scenarios     = [
-    "LVL 2 Go No Go",
-    "LVL 2 Inhibition Assessment",
-    "Engagement Drill (GNG)",
-]
+# ── Custom VirTra LSL Drills ─────────────────────────────────────────────────
+#
+# These are driven by the script-integrated custom LSL stream (name
+# "virtra_lsl", type "VirTra Events"), not by the native V_300 stream.
+# They resolve by the payload drill_type field instead of native scenario name.
 
-[cognitive_attributes.inhibition_assessment.targets]
-go     = ["Ivan"]
-no_go  = ["neutral"]
-ignore = ["fixation", "fixation (2)", "fixation (3)"]
-
-[cognitive_attributes.inhibition_assessment.params]
-late_shot_window_ms = 500    # ms after Target Removed to still accept a late Shot Fired
+[custom_lsl_drills.multicolor_gng]
+drill_key     = "gng"
+label         = "Go / No-Go"
+task_type     = "GNG"                # → cognitive_attributes/multicolor_gng/tracker.py
+metric_module = "gng"                # → cognitive_attributes/multicolor_gng/metrics.py
+description   = "Inhibitory control assessment driven by scenario-script custom LSL metadata."
 
 
 [cognitive_attributes.behavioral_discrimination]

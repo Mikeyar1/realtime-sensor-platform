@@ -97,6 +97,7 @@ LabReview.AAR.GNG = (function () {
             ${_card('ctx-go',   '\u2014', 'Go Trials (Threats)',      '', 'Number of threat targets presented during this session.')}
             ${_card('ctx-nogo', '\u2014', 'No-Go Trials (Civilians)', '', 'Number of civilian targets presented. Different proportions affect expected results.')}
             ${_card('ctx-prop', '\u2014', 'Go Proportion',            '', 'Ratio of threat vs. civilian targets. High proportions bias toward shooting.')}
+            ${_card('ctx-wild', '\u2014', 'Background Misses',        '', 'Shots that missed all visible targets.')}
           </div>
         </div>
 
@@ -162,6 +163,7 @@ LabReview.AAR.GNG = (function () {
     _setCard('ctx-go',   metrics.go_trials    ?? '—', `${metrics.go_trials ?? 0} presented`);
     _setCard('ctx-nogo', metrics.no_go_trials ?? '—', `${metrics.no_go_trials ?? 0} presented`);
     _setCard('ctx-prop', metrics.go_proportion != null ? metrics.go_proportion + '%' : '—', '');
+    _setCard('ctx-wild', metrics.wild_shots ?? 0, `${metrics.wild_shots ?? 0} missed background`, (metrics.wild_shots ?? 0) > 0 ? 'aar-card--warn' : 'aar-card--good');
 
     // Threat engagement
     const hitRate  = metrics.hit_rate  != null ? metrics.hit_rate  + '%' : '—';
@@ -232,6 +234,7 @@ LabReview.AAR.GNG = (function () {
     _setCard('ctx-go',   nGo,   `${running_metrics.hits ?? 0} hits`);
     _setCard('ctx-nogo', nNogo, `${running_metrics.correct_rejections ?? 0} correct rejections`);
     _setCard('ctx-prop', goProp, total > 0 ? `${nGo} / ${total} trials` : '');
+    _setCard('ctx-wild', running_metrics.wild_shots ?? 0, `${running_metrics.wild_shots ?? 0} missed background`, (running_metrics.wild_shots ?? 0) > 0 ? 'aar-card--warn' : 'aar-card--good');
 
     // Threat Engagement (Go Targets)
     const hitRate  = running_metrics.hit_rate_pct  != null ? running_metrics.hit_rate_pct  + '%' : '—';

@@ -24,16 +24,34 @@ from .drill_definition_registry import DrillDefinitionRegistry
 from .biosignal_rolling_monitor import BiosignalRollingMonitor
 from .analysis_service_client import AnalysisServiceClient
 from cognitive_attributes import ATTRIBUTE_REGISTRY
+from virtra_custom_lsl.event_decoder import decode_custom_lsl_sample
+from virtra_custom_lsl.session import CustomLslSessionBase
 
-# VirTra LSL stream name/type patterns
-_VIRTRA_NAME_PATTERN = re.compile(r"V_300|VirTra", re.IGNORECASE)
+# Native VirTra machine stream: name "V_300", type "VirTraEvents".
+# Kept as a narrow name match — do NOT broaden to a generic "VirTra" substring,
+# that would also match the custom stream's name below ("virtra_lsl").
+_VIRTRA_NAME_PATTERN = re.compile(r"^V_300$", re.IGNORECASE)
 _VIRTRA_TYPE = "VirTraEvents"
+
+# Custom, script-driven VirTra stream: name "virtra_lsl", type "VirTra Events"
+# (note the space — distinct from the native type above). See
+# validate_data/VirTra_Custom_LSL_Stream_Spec.txt.
+_VIRTRA_CUSTOM_TYPE = "VirTra Events"
 
 # Neon speech transcription stream pattern
 _SPEECH_TYPE_PATTERN = re.compile(r"speech.transcription", re.IGNORECASE)
 _SPEECH_IDX_TEXT = 0
 _SPEECH_IDX_USTART = 1
 _SPEECH_IDX_UEND = 2
+
+
+class _PassthroughCustomLslSession(CustomLslSessionBase):
+    """
+    Placeholder used until a drill_type -> tracker mapping exists (later phase).
+    Runs the shared scenario/round lifecycle bookkeeping only — no trial logic.
+    """
+    def on_drill_event(self, event):
+        pass
 
 
 def _parse_metadata_field(metadata_str: str, field_key: str) -> Optional[str]:
@@ -118,6 +136,13 @@ class VirTraScenarioOrchestrator:
         # at Scenario Started; None between sessions.
         self._active_tracker = None
 
+        # Custom VirTra LSL session — independent lifecycle from the native stream.
+        self._active_custom_session: Optional[CustomLslSessionBase] = None
+        self._active_custom_drill: Optional[dict] = None
+        self._active_custom_scenario: str = ""
+        self._custom_session_started_at: Optional[float] = None
+        self._custom_session_id: str = ""
+
         # Biosignal rolling monitor
         self._biosignals = BiosignalRollingMonitor(broadcast_fn=broadcast_fn, loop=loop)
 
@@ -147,7 +172,14 @@ class VirTraScenarioOrchestrator:
             self._handle_speech_sample(timestamp, data)
             return
 
-        # 2. VirTra stream check
+        # 2. Custom, script-driven VirTra stream — fully independent lifecycle
+        # from the native stream (3, below). Must be checked first: its name
+        # ("virtra_lsl") would otherwise be mistaken for the native stream.
+        if stream_type == _VIRTRA_CUSTOM_TYPE:
+            self._on_custom_lsl_sample(timestamp, data)
+            return
+
+        # 3. VirTra stream check
         is_virtra = (
             _VIRTRA_NAME_PATTERN.search(stream_name)
             or stream_type == _VIRTRA_TYPE
@@ -216,6 +248,140 @@ class VirTraScenarioOrchestrator:
             "drill_key":   self._active_drill["drill_key"] if self._active_drill else "general",
         }
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
+
+    def _on_custom_lsl_sample(self, timestamp: float, data: list):
+        """
+        Route one sample from the custom, script-driven VirTra LSL stream.
+
+        Fully independent lifecycle from the native VirTra stream — the custom
+        stream emits its own "Scenario Started"/"Scenario Stopped" and resolves
+        trackers by payload drill_type via [custom_lsl_drills] in the registry.
+        """
+        event = decode_custom_lsl_sample(data)
+        if event is None:
+            return
+
+        print(f"[VirTraScenarioOrchestrator] CustomLSL ▸ {event.event_name!r} | {event.event_description[:80]}")
+
+        if event.event_name == "Scenario Started" and self._active_custom_session is None:
+            self._handle_custom_lsl_scenario_started(timestamp, event)
+
+        if self._active_custom_session is not None:
+            self._active_custom_session.handle_event(event, timestamp)
+
+        msg = {
+            "type":        "session.custom_lsl_event",
+            "event_name":  event.event_name,
+            "event_code":  event.event_code,
+            "description": event.event_description,
+            "drill_type":  event.drill_type,
+            "round":       event.round,
+            "state":       event.state,
+            "data":        event.data,
+            "timestamp":   timestamp,
+        }
+        asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
+
+        if event.event_name in ("Scenario Stopped", "Scenario Destroyed"):
+            self._handle_custom_lsl_scenario_stopped(timestamp, event)
+
+    def _handle_custom_lsl_scenario_started(self, timestamp: float, event):
+        self._registry.reload()
+        drill_info = self._registry.resolve_custom_lsl_drill(event.drill_type)
+        if drill_info is None:
+            return
+
+        task_type = drill_info.get("task_type", "")
+        TrackerClass, _ = ATTRIBUTE_REGISTRY.get(task_type, (None, None))
+        if TrackerClass is None:
+            print(f"[VirTraScenarioOrchestrator] No custom LSL tracker for task_type={task_type!r}")
+            return
+
+        self._active_custom_drill = drill_info
+        self._active_custom_scenario = event.scenario_name
+        self._custom_session_started_at = timestamp
+        self._custom_session_id = event.scenario_id
+        self._active_custom_session = TrackerClass(broadcast_fn=self._broadcast, loop=self._loop)
+        self._active_custom_session.reset(
+            params=drill_info.get("params", {}),
+            targets=drill_info.get("targets", {}),
+        )
+        self._biosignals.reset()
+
+        msg = {
+            "type":          "session.scenario_started",
+            "scenario_name": event.scenario_name,
+            "session_id":    event.scenario_id,
+            "timestamp":     timestamp,
+            "drill_key":     drill_info["drill_key"],
+            "drill_label":   drill_info["label"],
+            "task_type":     task_type,
+            "targets":       drill_info.get("targets", {}),
+            "tracked_events": [],
+            "simulator":     "VirTra Custom LSL",
+            "simulator_system": event.scenario_display_name,
+        }
+        print(
+            f"[VirTraScenarioOrchestrator] ▶ Custom LSL Scenario Started: {event.scenario_name!r} "
+            f"→ drill_key={drill_info['drill_key']!r} task_type={task_type!r}"
+        )
+        asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
+
+    def _handle_custom_lsl_scenario_stopped(self, timestamp: float, event):
+        if self._active_custom_session is None or self._active_custom_drill is None:
+            return
+
+        drill_info = self._active_custom_drill
+        scenario_name = event.scenario_name or self._active_custom_scenario
+        session_id = event.scenario_id or self._custom_session_id
+        started_at = self._custom_session_started_at or timestamp
+
+        msg = {
+            "type":          "session.scenario_stopped",
+            "scenario_name": scenario_name,
+            "session_id":    session_id,
+            "timestamp":     timestamp,
+            "drill_key":     drill_info["drill_key"],
+        }
+        asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
+
+        biosignals = self._biosignals.snapshot_biosignals()
+        session_record = self._active_custom_session.get_session_record(
+            scenario_name=scenario_name,
+            session_id=session_id,
+            started_at=started_at,
+            stopped_at=timestamp,
+            biosignals=biosignals,
+            drill_key=drill_info["drill_key"],
+        )
+        asyncio.run_coroutine_threadsafe(
+            self._analysis_client.run_after_live_scenario(
+                drill_key=drill_info["drill_key"],
+                session_record=session_record,
+                scenario_name=scenario_name,
+            ),
+            self._loop,
+        )
+
+        self._last_session_metadata = {
+            "drill_key":      drill_info["drill_key"],
+            "task_type":      drill_info.get("task_type", "GENERAL"),
+            "scenario_name":  scenario_name,
+            "session_id":     session_id,
+            "started_at":     started_at,
+            "stopped_at":     timestamp,
+            "duration_s":     round(timestamp - started_at, 2),
+            "active_streams": list(self._active_streams_at_start),
+            "participant_id":   self._participant_id,
+            "participant_name": self._participant_name,
+        }
+
+        print(f"[VirTraScenarioOrchestrator] ■ Custom LSL Scenario Stopped: {scenario_name!r}")
+        self._active_custom_session = None
+        self._active_custom_drill = None
+        self._active_custom_scenario = ""
+        self._custom_session_started_at = None
+        self._custom_session_id = ""
 
     def on_catalog_changed(self, catalog: list):
         """Track active stream names for session metadata capture."""
@@ -437,6 +603,19 @@ class VirTraScenarioOrchestrator:
 
     def get_active_drill_state(self) -> dict | None:
         """Return active drill metadata for reconnecting clients."""
+        if self._active_drill is None and self._active_custom_drill is not None:
+            return {
+                "type":           "session.scenario_started",
+                "scenario_name":  self._active_custom_scenario or "",
+                "session_id":     self._custom_session_id or "",
+                "timestamp":      self._custom_session_started_at or 0.0,
+                "drill_key":      self._active_custom_drill["drill_key"],
+                "drill_label":    self._active_custom_drill["label"],
+                "task_type":      self._active_custom_drill.get("task_type", "GENERAL"),
+                "targets":        self._active_custom_drill.get("targets", {}),
+                "tracked_events": [],
+                "replayed":       True,
+            }
         if self._active_drill is None:
             return None
         return {

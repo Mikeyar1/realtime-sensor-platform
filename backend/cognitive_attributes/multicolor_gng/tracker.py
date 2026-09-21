@@ -1,0 +1,265 @@
+"""
+cognitive_attributes/multicolor_gng/tracker.py — Custom-LSL-driven Go/No-Go tracker.
+
+Registered under task_type "GNG" — replaces the old native-VirTra-driven GNG
+tracker, which had no reliable signal to classify a target as go/no-go (native
+Target Activated events carry no such field). This tracker is driven entirely
+by the custom "virtra_lsl" stream instead (see
+validate_data/VirTra_Custom_LSL_Stream_Spec.txt), which already tags each
+engagement with ground-truth classification computed by the scenario script
+itself.
+
+TRIAL LIFECYCLE
+    Target Appeared   -> open trial (target_id, expected_action -> go/no_go)
+    Shot Hit           -> closes the trial the shot's target belongs to
+                          (hit = go engaged, false_alarm = no_go engaged)
+    Target Timed Out   -> closes an unengaged trial
+                          (miss = go withheld, correct_rejection = no_go withheld)
+    Shot Missed        -> background/wild shot — does not close any trial
+
+Both closing events already carry the scenario script's own classification
+(gng_classification / classification fields) — this tracker trusts that
+directly rather than re-deriving it from raw geometry/timing, which is
+exactly the signal the native stream doesn't provide.
+
+Scenario/round lifecycle bookkeeping (Scenario Started/Stopped, Round
+Started/Completed/Reset) is inherited from CustomLslSessionBase — this class
+only implements on_drill_event() for trial-level logic.
+"""
+
+import asyncio
+import statistics
+from dataclasses import dataclass
+from typing import Optional
+
+from virtra_custom_lsl.session import CustomLslSessionBase
+from virtra_custom_lsl.event_decoder import CustomLslEvent
+
+HIT               = "hit"
+MISS              = "miss"
+FALSE_ALARM       = "false_alarm"
+CORRECT_REJECTION = "correct_rejection"
+
+
+@dataclass
+class _GngTrialState:
+    """Mutable state for one in-progress trial."""
+    trial_number: int
+    target_id:    str
+    target_name:  str
+    target_type:  str          # "go" | "no_go"
+    round_number: int
+    activated_at: float        # scenario-time seconds at Target Appeared
+
+
+@dataclass
+class CompletedMulticolorGngTrial:
+    """Immutable record of a finished trial."""
+    trial_number: int
+    target_id:    str
+    target_name:  str
+    target_type:  str
+    round_number: int
+    result:       str
+    rt_ms:        Optional[float]
+    activated_at: float
+    shot_at:      Optional[float]
+
+
+class MulticolorGngTracker(CustomLslSessionBase):
+    """
+    One instance per session — created fresh whenever the custom LSL stream's
+    "Scenario Started" resolves to a registered custom_lsl_drills entry with
+    task_type "GNG". Fed via handle_event(), not on_virtra_event() — this
+    tracker has no native-VirTra-stream code path at all.
+    """
+
+    def __init__(self, broadcast_fn, loop: asyncio.AbstractEventLoop):
+        super().__init__()
+        self._broadcast_fn = broadcast_fn
+        self._loop          = loop
+
+        self._active:    dict[str, _GngTrialState]          = {}
+        self._completed: list[CompletedMulticolorGngTrial]  = []
+        self._trial_counter = 0
+        self._wild_shots     = 0   # Shot Missed — background misses
+
+    # Standard tracker interface (same shape as every other cognitive attribute)
+
+    def reset(self, params: dict | None = None, targets: dict | None = None):
+        self._active.clear()
+        self._completed.clear()
+        self._trial_counter = 0
+        self._wild_shots = 0
+
+    def on_virtra_event(self, event_type: str, timestamp: float, metadata_dict: dict):
+        return
+
+    def get_completed_trials(self) -> list[dict]:
+        return [self._trial_to_dict(t) for t in self._completed]
+
+    def get_session_record(
+        self,
+        scenario_name: str,
+        session_id:    str,
+        started_at:    float,
+        stopped_at:    float,
+        biosignals:    Optional[dict] = None,
+        drill_key:     str = "",
+    ) -> dict:
+        duration_s = round(stopped_at - started_at, 2) if started_at and stopped_at else None
+        return {
+            "schema_version": 1,
+            "task_type":      "GNG",
+            "drill_key":      drill_key,
+            "scenario_name":  scenario_name,
+            "session_id":     session_id,
+            "started_at":     started_at,
+            "stopped_at":     stopped_at,
+            "duration_s":     duration_s,
+            "wild_shots":     self._wild_shots,
+            "rounds":         len(self.round_history),
+            "trials":         self.get_completed_trials(),
+            "biosignals":     biosignals or {},
+        }
+
+    # CustomLslSessionBase hook — called for every event after the base class
+    # has already handled scenario/round lifecycle bookkeeping.
+
+    def on_drill_event(self, event: CustomLslEvent) -> None:
+        if event.event_name == "Target Appeared":
+            self._on_target_appeared(event)
+        elif event.event_name == "Shot Hit":
+            self._on_shot_hit(event)
+        elif event.event_name == "Target Timed Out":
+            self._on_target_timed_out(event)
+        elif event.event_name == "Shot Missed":
+            self._wild_shots += 1
+
+    # Event handlers
+
+    def _on_target_appeared(self, event: CustomLslEvent):
+        d = event.data
+        target_id = d.get("target_id", "")
+        if not target_id:
+            return
+
+        target_type = "go" if d.get("expected_action") == "shoot" else "no_go"
+        self._trial_counter += 1
+        self._active[target_id] = _GngTrialState(
+            trial_number = self._trial_counter,
+            target_id    = target_id,
+            target_name  = d.get("target_name", ""),
+            target_type  = target_type,
+            round_number = self.current_round,
+            activated_at = d.get("spawn_timestamp_seconds", event.scenario_time_s),
+        )
+
+    def _on_shot_hit(self, event: CustomLslEvent):
+        shot   = event.data.get("shot", {})
+        target = shot.get("target", {})
+        target_id = shot.get("entity_id") or target.get("target_id", "")
+
+        trial = self._active.pop(target_id, None)
+        if trial is None:
+            return  # fixation/background hit — not a tracked target
+
+        result = HIT if shot.get("gng_classification") == "true_positive" else FALSE_ALARM
+        rt_s   = shot.get("reaction_time_seconds")
+        rt_ms  = rt_s * 1000.0 if rt_s is not None else None
+
+        self._close(trial, result, rt_ms, event.scenario_time_s)
+
+    def _on_target_timed_out(self, event: CustomLslEvent):
+        target    = event.data.get("target", {})
+        target_id = target.get("target_id", "")
+
+        trial = self._active.pop(target_id, None)
+        if trial is None:
+            return
+
+        result = MISS if event.data.get("classification") == "false_negative" else CORRECT_REJECTION
+        self._close(trial, result, None, None)
+
+    def _close(self, trial: _GngTrialState, result: str, rt_ms: Optional[float], shot_at: Optional[float]):
+        completed = CompletedMulticolorGngTrial(
+            trial_number = trial.trial_number,
+            target_id    = trial.target_id,
+            target_name  = trial.target_name,
+            target_type  = trial.target_type,
+            round_number = trial.round_number,
+            result       = result,
+            rt_ms        = rt_ms,
+            activated_at = trial.activated_at,
+            shot_at      = shot_at,
+        )
+        self._completed.append(completed)
+        self._broadcast_update(completed)
+
+    @staticmethod
+    def _trial_to_dict(t: CompletedMulticolorGngTrial) -> dict:
+        return {
+            "trial_number": t.trial_number,
+            "target_id":    t.target_id,
+            "target_name":  t.target_name,
+            "target_type":  t.target_type,
+            "round_number": t.round_number,
+            "result":       t.result,
+            "rt_ms":        round(t.rt_ms, 2) if t.rt_ms is not None else None,
+            "activated_at": t.activated_at,
+            "shot_at":      t.shot_at,
+        }
+
+    # Running metrics (ms-based — consumed live by the frontend trial_update handler)
+
+    def _compute_running_metrics(self) -> dict:
+        total_go   = sum(1 for t in self._completed if t.target_type == "go")
+        total_nogo = sum(1 for t in self._completed if t.target_type == "no_go")
+        hits   = sum(1 for t in self._completed if t.result == HIT)
+        misses = sum(1 for t in self._completed if t.result == MISS)
+        fas    = sum(1 for t in self._completed if t.result == FALSE_ALARM)
+        crs    = sum(1 for t in self._completed if t.result == CORRECT_REJECTION)
+        rts    = [t.rt_ms for t in self._completed if t.rt_ms is not None]
+
+        return {
+            "total_go":           total_go,
+            "total_no_go":        total_nogo,
+            "hits":               hits,
+            "misses":             misses,
+            "false_alarms":       fas,
+            "correct_rejections": crs,
+            "hit_rate_pct":       round(hits   / total_go   * 100, 1) if total_go   else None,
+            "miss_rate_pct":      round(misses / total_go   * 100, 1) if total_go   else None,
+            "fa_rate_pct":        round(fas    / total_nogo * 100, 1) if total_nogo else None,
+            "cr_rate_pct":        round(crs    / total_nogo * 100, 1) if total_nogo else None,
+            "mean_rt_ms":         round(statistics.mean(rts),   1) if rts else None,
+            "median_rt_ms":       round(statistics.median(rts), 1) if rts else None,
+            "sd_rt_ms":           round(statistics.stdev(rts),  1) if len(rts) >= 2 else None,
+            "wild_shots":         self._wild_shots,
+            "round":              self.current_round,
+        }
+
+    # Broadcast
+
+    def _broadcast_update(self, trial: CompletedMulticolorGngTrial):
+        metrics = self._compute_running_metrics()
+        msg = {
+            "type":      "session.trial_update",
+            "task_type": "GNG",
+            "trial": {
+                "trial_number": trial.trial_number,
+                "target_name":  trial.target_name,
+                "target_type":  trial.target_type,
+                "result":       trial.result,
+                "rt_ms":        round(trial.rt_ms, 1) if trial.rt_ms is not None else None,
+            },
+            "running_metrics": metrics,
+        }
+        asyncio.run_coroutine_threadsafe(self._broadcast_fn(msg), self._loop)
+
+        rt_label = f"{trial.rt_ms:.0f}ms" if trial.rt_ms is not None else "—"
+        print(
+            f"[MulticolorGngTracker] Trial {trial.trial_number:3d} | round={trial.round_number} | "
+            f"{trial.target_name:<12s} [{trial.target_type:<6s}] | {trial.result:<18s} | RT={rt_label:>8s} | "
+            f"hits={metrics['hits']} miss={metrics['misses']} FA={metrics['false_alarms']} CR={metrics['correct_rejections']}"
+        )

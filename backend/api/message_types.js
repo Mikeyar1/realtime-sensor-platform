@@ -46,6 +46,7 @@ export const MSG = Object.freeze({
 
   // Real-time signals
   VIRTRA_EVENT: 'session.virtra_event',
+  CUSTOM_LSL_EVENT: 'session.custom_lsl_event',
   BIOSIGNAL_UPDATE: 'session.biosignal_update',
   TRIAL_UPDATE: 'session.trial_update',
 
@@ -101,6 +102,7 @@ export const LSL_TYPE = Object.freeze({
   WEBCAM_FATIGUE: 'WebcamFatigue',
   POSE: 'Pose',
   VIRTRA: 'VirTraEvents',
+  VIRTRA_CUSTOM: 'VirTra Events',
 });
 
 // Streams excluded from dashboard visualisation

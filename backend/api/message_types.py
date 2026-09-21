@@ -44,6 +44,10 @@ MSG_SESSION_RECORD_SAVED   = "session.record_saved"
 # Real-time VirTra event (broadcast by LiveService on every VirTra sample)
 MSG_VIRTRA_EVENT         = "session.virtra_event"
 
+# Real-time custom VirTra LSL event (script-driven stream, distinct from the
+# native machine stream above)
+MSG_CUSTOM_LSL_EVENT     = "session.custom_lsl_event"
+
 MSG_BIOSIGNAL_UPDATE     = "session.biosignal_update"
 
 # Real-time trial update — one message per completed trial, for all drill types.
@@ -98,6 +102,10 @@ LSL_TYPE_SPEECH          = "speech_transcription"
 LSL_TYPE_WEBCAM_FATIGUE  = "WebcamFatigue"
 LSL_TYPE_POSE            = "Pose"
 LSL_TYPE_VIRTRA          = "VirTraEvents"
+
+# Custom, script-driven VirTra stream (distinct from the native machine
+# stream above — note the space in the type string)
+LSL_TYPE_VIRTRA_CUSTOM   = "VirTra Events"
 
 # Streams excluded from the live chart dashboard (not visualisable as 2D charts)
 LSL_TYPES_EXCLUDED = {LSL_TYPE_MAG_3D, LSL_TYPE_MAG_COMPASS, LSL_TYPE_INDICATOR, LSL_TYPE_POSE}

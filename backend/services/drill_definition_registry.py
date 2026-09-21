@@ -43,6 +43,7 @@ class DrillDefinitionRegistry:
         self._path = toml_path
         self._data: dict = {}
         self._scenario_map: dict[str, dict] = {}   # scenario_name_lower → drill dict
+        self._custom_lsl_map: dict[str, dict] = {}  # drill_type_lower → drill dict
         self._general_events: list[str] = []
         self._load()
 
@@ -81,10 +82,25 @@ class DrillDefinitionRegistry:
                     "scenario_name": scenario_name,
                 }
 
+        # Custom, script-driven VirTra LSL drills — resolved by the stream's
+        # own drill_type field instead of by native VirTra scenario name.
+        custom_drills: dict = self._data.get("custom_lsl_drills", {})
+        for drill_type, custom_cfg in custom_drills.items():
+            self._custom_lsl_map[drill_type.lower().strip()] = {
+                "drill_key":       custom_cfg.get("drill_key", drill_type),
+                "label":           custom_cfg.get("label", drill_type),
+                "description":     custom_cfg.get("description", ""),
+                "task_type":       custom_cfg.get("task_type", "GENERAL"),
+                "metric_module":   custom_cfg.get("metric_module", ""),
+                "targets":         custom_cfg.get("targets", {}),
+                "params":          custom_cfg.get("params", {}),
+                "custom_lsl_type": drill_type,
+            }
+
         mapped = len(self._scenario_map)
         print(
             f"[DrillDefinitionRegistry] Loaded {len(attributes)} cognitive attribute "
-            f"categories, {mapped} scenario mappings | {self._path}"
+            f"categories, {mapped} scenario mappings, {len(custom_drills)} custom LSL mappings | {self._path}"
         )
 
     def resolve_drill(self, scenario_name: str) -> Optional[dict]:
@@ -112,6 +128,21 @@ class DrillDefinitionRegistry:
         merged_params   = {**base_params, **scenario_params}
 
         return {**result, "params": merged_params}
+
+    def resolve_custom_lsl_drill(self, drill_type: str) -> Optional[dict]:
+        """
+        Resolve a custom VirTra LSL drill from its payload drill_type field.
+        Returns None if the custom drill is not configured.
+        """
+        key = (drill_type or "").lower().strip()
+        result = self._custom_lsl_map.get(key)
+        if result is None:
+            print(
+                f"[DrillDefinitionRegistry] Unrecognized custom LSL drill_type: {drill_type!r} "
+                f"— ignoring (not registered in drill_registry.toml)"
+            )
+            return None
+        return dict(result)
 
     def get_tracked_events(self, drill_key: str) -> list[str]:
         """Return the tracked_events list for a given drill key."""
@@ -146,5 +177,6 @@ class DrillDefinitionRegistry:
     def reload(self):
         """Hot-reload the TOML file without restarting."""
         self._scenario_map.clear()
+        self._custom_lsl_map.clear()
         self._load()
 

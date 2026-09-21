@@ -17,8 +17,8 @@ Done — no other code changes needed.
 from .pvt.tracker import PvtTracker
 from .pvt.metrics import compute_live_metrics as _pvt_metrics
 
-from .gng.tracker import GngTracker
-from .gng.metrics import compute_live_metrics as _gng_metrics
+from .multicolor_gng.tracker import MulticolorGngTracker
+from .multicolor_gng.metrics import compute_live_metrics as _gng_metrics
 
 from .discrimination.tracker import DiscriminationTracker
 from .discrimination.metrics import compute_live_metrics as _discrimination_metrics
@@ -37,7 +37,7 @@ from .discrimination.metrics import compute_live_metrics as _discrimination_metr
 
 ATTRIBUTE_REGISTRY: dict[str, tuple] = {
     "PVT": (PvtTracker, _pvt_metrics),
-    "GNG": (GngTracker, _gng_metrics),
+       "GNG": (MulticolorGngTracker, _gng_metrics),
     "DISCRIMINATION": (DiscriminationTracker, _discrimination_metrics),
     # "MARKSMANSHIP": (MarksmanshipTracker, _marksmanship_metrics),  ← add future attributes here
 }
