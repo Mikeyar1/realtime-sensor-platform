@@ -3,6 +3,16 @@ session_lifecycle_coordinator.py — Session coordinator and high-level state ma
 
 Routes incoming WebSocket commands to VirTraScenarioOrchestrator.
 Owns the high-level live session state: IDLE ↔ LISTENING ↔ LIVE.
+
+Session persistence flow (auto-save, no save button):
+  1. Scenario stops → analysis_service_client auto-saves to DB + disk.
+  2. Frontend receives session.metrics_ready with session_uuid + participant_name.
+  3. Frontend shows Confirm / Discard panel with a participant name dropdown.
+  4. Operator confirms (optionally correcting the name) → db.confirm_session
+     → updates participant name in DB if changed, broadcasts db.session_saved.
+  5. Operator discards → db.discard_session
+     → deletes DB row + JSON file, broadcasts db.session_discarded.
+  6. Operator clicks New Session → resets to IDLE.
 """
 
 import asyncio
@@ -11,10 +21,14 @@ from typing import Callable, Optional
 
 from api.message_types import (
     MSG_SESSION_STATE, MSG_STREAMS_CATALOG, MSG_API_ERROR,
-    MSG_SESSION_SAVE_RECORD, MSG_SESSION_RECORD_SAVED,
+    MSG_SESSION_RECORD_SAVED, MSG_SESSION_SAVE_RECORD,
     STATE_IDLE, STATE_LISTENING,
     MODE_LIVE,
     LSL_TYPES_EXCLUDED,
+    MSG_DB_GET_PARTICIPANTS, MSG_DB_CONFIRM_SESSION,
+    MSG_DB_DISCARD_SESSION, MSG_DB_UPDATE_PARTICIPANT,
+    MSG_DB_PARTICIPANTS_LIST, MSG_DB_SESSION_SAVED,
+    MSG_DB_SESSION_DISCARDED, MSG_DB_PARTICIPANT_UPDATED,
 )
 from .virtra_scenario_orchestrator import VirTraScenarioOrchestrator
 from .session_data_writer import write_session_record
@@ -25,6 +39,36 @@ try:
 except (ImportError, AttributeError):
     import os
     _SESSION_DATA_DIR = os.path.abspath("../data/SessionData")
+
+
+def _db_get_participants() -> list[str]:
+    """Thread-safe DB call — run via executor."""
+    try:
+        from services.database import get_all_participant_names  # type: ignore
+        return get_all_participant_names()
+    except Exception as e:
+        print(f"[SessionLifecycleCoordinator] DB get_participants error: {e}")
+        return []
+
+
+def _db_confirm(session_uuid: str, new_name: str) -> tuple[bool, str]:
+    """Thread-safe DB call — update participant name on a session."""
+    try:
+        from services.database import update_participant_name  # type: ignore
+        return update_participant_name(session_uuid, new_name)
+    except Exception as e:
+        print(f"[SessionLifecycleCoordinator] DB confirm error: {e}")
+        return False, str(e)
+
+
+def _db_discard(session_uuid: str) -> bool:
+    """Thread-safe DB call — delete session + JSON from disk."""
+    try:
+        from services.database import delete_session  # type: ignore
+        return delete_session(session_uuid)
+    except Exception as e:
+        print(f"[SessionLifecycleCoordinator] DB discard error: {e}")
+        return False
 
 
 class SessionLifecycleCoordinator:
@@ -73,42 +117,141 @@ class SessionLifecycleCoordinator:
             self._orchestrator.clear_last_session_metadata()
             self._orchestrator._analysis_client.clear_pending()
             await self._orchestrator.handle_live_activate(websocket)
+
         elif msg_type == "live.deactivate":
             await self._orchestrator.handle_live_deactivate(websocket)
+
+        # Legacy save_record — kept for backwards compat; forwards to confirm flow
         elif msg_type == MSG_SESSION_SAVE_RECORD:
-            await self._handle_save_record(websocket, msg)
+            await self._handle_legacy_save_record(websocket, msg)
+
         elif msg_type == "streams.get_catalog":
             await self._send(websocket, self._catalog_payload())
+
         elif msg_type == "system.get_state":
             await self._send(websocket, self._state_payload())
             await self._send(websocket, self._catalog_payload())
+
         elif msg_type == "system.ping":
             await self._send(websocket, {
                 "type":      "system.pong",
                 "client_ts": msg.get("ts", 0),
                 "server_ts": time.time(),
             })
+
+        # ── Database message handlers ─────────────────────────────────────────
+
+        elif msg_type == MSG_DB_GET_PARTICIPANTS:
+            await self._handle_db_get_participants(websocket)
+
+        elif msg_type == MSG_DB_CONFIRM_SESSION:
+            await self._handle_db_confirm_session(websocket, msg)
+
+        elif msg_type == MSG_DB_DISCARD_SESSION:
+            await self._handle_db_discard_session(websocket, msg)
+
+        elif msg_type == MSG_DB_UPDATE_PARTICIPANT:
+            await self._handle_db_update_participant(websocket, msg)
+
         else:
             print(f"[SessionLifecycleCoordinator] Unknown message type: {msg_type!r} — ignoring")
 
-    async def _handle_save_record(self, websocket, msg: dict):
+    # ── Database handlers ────────────────────────────────────────────────────
+
+    async def _handle_db_get_participants(self, websocket):
+        """Return all known participant names for the frontend dropdown."""
+        names = await self._loop.run_in_executor(None, _db_get_participants)
+        await self._send(websocket, {
+            "type":  MSG_DB_PARTICIPANTS_LIST,
+            "names": names,
+        })
+
+    async def _handle_db_confirm_session(self, websocket, msg: dict):
         """
-        Operator has confirmed participant metadata and clicked Save.
-        Assembles session_record.json from cached scenario metadata + Analysis metrics
-        + operator-supplied fields, writes to disk, broadcasts session.record_saved.
+        Operator confirmed the session (optionally correcting the participant name).
+        Updates participant name in DB if changed; clears pending state.
         """
-        analysis_client = self._orchestrator._analysis_client
+        session_uuid     = str(msg.get("session_uuid", "")).strip()
+        participant_name = str(msg.get("participant_name", "")).strip()
+        notes            = str(msg.get("notes", "")).strip()
+
+        success, detail = await self._loop.run_in_executor(
+            None, _db_confirm, session_uuid, participant_name
+        )
+
+        response = {
+            "type":             MSG_DB_SESSION_SAVED,
+            "session_uuid":     session_uuid,
+            "participant_name": participant_name,
+            "success":          success,
+            "detail":           detail,
+        }
+        await self._send(websocket, response)
+        await self._broadcast(response)
+
+        if success:
+            self._orchestrator._analysis_client.clear_pending()
+            self._orchestrator.clear_last_session_metadata()
+            print(f"[SessionLifecycleCoordinator] Session confirmed: "
+                  f"uuid={session_uuid!r} participant={participant_name!r}")
+
+    async def _handle_db_discard_session(self, websocket, msg: dict):
+        """
+        Operator discarded the session.
+        Deletes session from DB + JSON file from disk; clears pending state.
+        """
+        session_uuid = str(msg.get("session_uuid", "")).strip()
+
+        deleted = await self._loop.run_in_executor(None, _db_discard, session_uuid)
+
+        response = {
+            "type":         MSG_DB_SESSION_DISCARDED,
+            "session_uuid": session_uuid,
+            "success":      deleted,
+        }
+        await self._send(websocket, response)
+        await self._broadcast(response)
+
+        self._orchestrator._analysis_client.clear_pending()
+        self._orchestrator.clear_last_session_metadata()
+        print(f"[SessionLifecycleCoordinator] Session discarded: uuid={session_uuid!r}")
+
+    async def _handle_db_update_participant(self, websocket, msg: dict):
+        """Rename a participant linked to a specific session_uuid."""
+        session_uuid = str(msg.get("session_uuid", "")).strip()
+        new_name     = str(msg.get("new_name", "")).strip()
+
+        success, detail = await self._loop.run_in_executor(
+            None, _db_confirm, session_uuid, new_name
+        )
+
+        await self._send(websocket, {
+            "type":         MSG_DB_PARTICIPANT_UPDATED,
+            "session_uuid": session_uuid,
+            "new_name":     new_name,
+            "success":      success,
+            "detail":       detail,
+        })
+
+    # ── Legacy save_record (backwards-compat shim) ────────────────────────────
+
+    async def _handle_legacy_save_record(self, websocket, msg: dict):
+        """
+        Backwards-compatible handler for the old session.save_record message.
+        Routes to the confirm flow using the participant_name from the message.
+        The JSON write to SessionData/ is still triggered for compatibility.
+        """
+        analysis_client  = self._orchestrator._analysis_client
         pending_metrics  = analysis_client.get_pending_metrics()
         session_metadata = self._orchestrator.get_last_session_metadata() or {}
 
-        # Merge operator-supplied participant fields into session_metadata
         operator_input = {
-            "participant_id":   str(msg.get("participant_id",   "")).strip(),
+            "participant_id":   str(msg.get("participant_id", "")).strip(),
             "participant_name": str(msg.get("participant_name", "")).strip(),
-            "notes":            str(msg.get("notes",            "")).strip(),
+            "notes":            str(msg.get("notes", "")).strip(),
         }
 
-        # Run the file write in a thread so it never blocks the asyncio event loop
+        # Write the final SessionData/ record (legacy path)
         saved_path = await self._loop.run_in_executor(
             None,
             write_session_record,
@@ -118,7 +261,6 @@ class SessionLifecycleCoordinator:
             _SESSION_DATA_DIR,
         )
 
-        # Confirm to the requesting client and broadcast to all
         confirmation = {
             "type":       MSG_SESSION_RECORD_SAVED,
             "drill_key":  session_metadata.get("drill_key", ""),
@@ -128,10 +270,8 @@ class SessionLifecycleCoordinator:
         await self._send(websocket, confirmation)
         await self._broadcast(confirmation)
 
-        # Clean up: clear pending state so the next session starts fresh
         analysis_client.clear_pending()
         self._orchestrator.clear_last_session_metadata()
-
 
     # ── Connection hook ───────────────────────────────────────────────────────
 
@@ -212,4 +352,3 @@ class SessionLifecycleCoordinator:
         self._state = STATE_IDLE
         self._live_start_wall = 0.0
         print(f"[SessionLifecycleCoordinator] Live mode DEACTIVATED — session ran for {elapsed}s")
-

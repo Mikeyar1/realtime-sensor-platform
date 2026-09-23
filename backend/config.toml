@@ -21,3 +21,9 @@ post_scenario_delay_s = 3.0
 # Directory where permanent session records are saved (relative to Backend/).
 # One sub-folder per completed session: <drill_key>_<participant_id>_<YYYY-MM-DD_HH-MM-SS>/session_record.json
 session_data_directory = "../data/SessionData"
+
+[database]
+# Path to the SQLite database file (relative to Backend/).
+# The database/ directory will be created automatically at startup if it does not exist.
+path = "../database/labreview.db"
+

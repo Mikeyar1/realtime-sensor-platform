@@ -18,10 +18,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-from config import HOST, PORT, LSL_DISCOVERY_INTERVAL, LSL_PULL_TIMEOUT
+from config import HOST, PORT, LSL_DISCOVERY_INTERVAL, LSL_PULL_TIMEOUT, DATABASE_PATH
 from lsl.lsl_stream_inlet_manager import LslStreamInletManager
 from transport.websocket_server_transport import WebSocketServerTransport
 from services.session_lifecycle_coordinator import SessionLifecycleCoordinator
+from services.database import init_db
+
 
 
 class LabReviewBackendServer:
@@ -33,6 +35,9 @@ class LabReviewBackendServer:
         self.host = host
         self.port = port
         self._loop: asyncio.AbstractEventLoop | None = None
+
+        # 0. Initialize SQLite database (idempotent — creates tables if needed)
+        init_db(DATABASE_PATH)
 
         # 1. Initialize WebSocket transport
         self.transport = WebSocketServerTransport(host=self.host, port=self.port)

@@ -41,6 +41,19 @@ MSG_METRICS_READY        = "session.metrics_ready"
 MSG_SESSION_SAVE_RECORD    = "session.save_record"
 MSG_SESSION_RECORD_SAVED   = "session.record_saved"
 
+# Database — participant management & session confirm/discard (Client → Server)
+MSG_DB_GET_PARTICIPANTS    = "db.get_participants"
+MSG_DB_CONFIRM_SESSION     = "db.confirm_session"     # {session_uuid, participant_name, notes}
+MSG_DB_DISCARD_SESSION     = "db.discard_session"     # {session_uuid}
+MSG_DB_UPDATE_PARTICIPANT  = "db.update_participant"  # {old_name, new_name}
+
+# Database — server responses (Server → Client)
+MSG_DB_PARTICIPANTS_LIST   = "db.participants_list"   # {names: [...]}
+MSG_DB_SESSION_SAVED       = "db.session_saved"       # {session_uuid, participant_name, success}
+MSG_DB_SESSION_DISCARDED   = "db.session_discarded"   # {session_uuid, success}
+MSG_DB_PARTICIPANT_UPDATED = "db.participant_updated" # {old_name, new_name, success}
+
+
 # Real-time VirTra event (broadcast by LiveService on every VirTra sample)
 MSG_VIRTRA_EVENT         = "session.virtra_event"
 

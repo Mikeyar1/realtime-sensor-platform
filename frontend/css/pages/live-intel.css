@@ -691,6 +691,65 @@
   color: var(--text-secondary);
 }
 
+/* Discard button */
+.save-btn-discard {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid #c0392b;
+  border-radius: 5px;
+  color: #c0392b;
+  font-family: var(--font-family);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.save-btn-discard:hover  { background: #c0392b; color: #fff; }
+.save-btn-discard:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Subtitle below the Auto-Saved header */
+.save-panel-subtitle {
+  margin: 2px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+/* Combo: input + datalist wrapper */
+.save-field-combo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Hint text below a field (e.g. "Auto-assigned: …") */
+.save-field-hint {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.save-field-hint code {
+  font-family: monospace;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* Discarded panel state */
+.save-panel-inner--discarded {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: rgba(192, 57, 43, 0.08);
+  border: 1px solid rgba(192, 57, 43, 0.25);
+  border-radius: 8px;
+}
+.save-panel-check--discard { font-size: 1.4rem; }
+
 /* ══════════════════════════════════════════════════════════════
    LEGACY — kept for backward-compat with existing live-intel-content
    uses and the .intel-state-banner / .chart-grid infrastructure

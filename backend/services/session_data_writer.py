@@ -75,8 +75,8 @@ def write_session_record(
         file_path = os.path.join(folder_path, "session_record.json")
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(record, f, indent=2, ensure_ascii=False)
-        print(f"[SessionDataWriter] ✓ session_record.json → {file_path}")
+        print(f"[SessionDataWriter] OK session_record.json -> {file_path}")
         return file_path
     except OSError as e:
-        print(f"[SessionDataWriter] ✗ Could not write session_record.json: {e}")
+        print(f"[SessionDataWriter] x Could not write session_record.json: {e}")
         return None

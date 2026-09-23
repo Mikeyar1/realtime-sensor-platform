@@ -73,7 +73,7 @@ LabReview.LiveIntelPage = (function () {
     // Trial updates (PVT, GNG) → metric cards
     LabReview.EventBus.on('trial-update', _onTrialUpdate);
 
-    // Post-scenario analysis metrics
+    // Post-scenario analysis metrics (auto-saved to DB already)
     LabReview.EventBus.on('metrics-ready', _onMetricsReady);
 
     // Biosignal updates → physiological cards
@@ -91,8 +91,13 @@ LabReview.LiveIntelPage = (function () {
     // Auto-fill participant / session from LSL Participant stream
     LabReview.EventBus.on('session-info-received', _onSessionInfoReceived);
 
-    // Operator saved the session record → show confirmation
-    LabReview.EventBus.on('record-saved', _onRecordSaved);
+    // DB responses
+    LabReview.EventBus.on('db-participants-list', _onParticipantsList);
+    LabReview.EventBus.on('db-session-saved',     _onSessionSaved);
+    LabReview.EventBus.on('db-session-discarded', _onSessionDiscarded);
+
+    // Legacy record-saved (backwards compat)
+    LabReview.EventBus.on('record-saved', _onLegacyRecordSaved);
 
     // Page navigation
     LabReview.EventBus.on('page-changed', (page) => {
@@ -394,10 +399,15 @@ LabReview.LiveIntelPage = (function () {
     _activeDisplay?.onMetricsReady?.(metrics);
 
     _setState('RESULTS');
-    _showResultsBanner('Scenario complete');
+    _showResultsBanner('Scenario complete — auto-saved');
 
-    // Show the save panel so the operator can attach participant metadata
-    _showSavePanel();
+    // Store session identity for confirm/discard panel
+    _pendingSessionUuid = msg.session_uuid || '';
+    _pendingParticipantName = msg.participant_name || '';
+
+    // Show Confirm/Discard panel and request participant list for dropdown
+    _showConfirmPanel(_pendingParticipantName);
+    LabReview.StreamRouter.send({ type: 'db.get_participants' });
   }
 
   // ── Trial / biosignal update routing ──────────────────────────────────────
@@ -435,92 +445,164 @@ LabReview.LiveIntelPage = (function () {
     _activeDisplay?.onWeaponInfo?.(msg);
   }
 
-  // ── Save panel ────────────────────────────────────────────────────────────
+  // ── Confirm / Discard panel ────────────────────────────────────────────────
 
-  function _showSavePanel() {
-    const prefillId = _participantId || '';
-    const prefillName = '';
-    const prefillNote = '';
+  /** State for the active confirm/discard panel */
+  let _pendingSessionUuid    = '';
+  let _pendingParticipantName = '';
+  let _knownParticipants     = [];
 
-    let panel = document.getElementById('li-save-panel');
+  function _showConfirmPanel(autoName) {
+    const panel = document.getElementById('li-save-panel');
     if (!panel) return;
 
+    const safeName = _escHtml(autoName || '');
+
     panel.innerHTML = `
-      <div class="save-panel-inner">
+      <div class="save-panel-inner" id="sp-inner">
         <div class="save-panel-header">
-          <h3 class="save-panel-title">Save Session Record</h3>
+          <h3 class="save-panel-title">✅ Session Auto-Saved</h3>
+          <p class="save-panel-subtitle">Review and confirm participant details, or discard this session.</p>
         </div>
 
         <div class="save-panel-fields">
-          <div class="save-field-group">
-            <label class="save-field-label" for="sp-pid">Participant ID</label>
-            <input id="sp-pid" class="save-field-input" type="text"
-                   placeholder="e.g. P001" value="${_escHtml(prefillId)}">
-          </div>
-          <div class="save-field-group">
+          <div class="save-field-group save-field-group--full">
             <label class="save-field-label" for="sp-pname">Participant Name</label>
-            <input id="sp-pname" class="save-field-input" type="text"
-                   placeholder="e.g. Jane Doe" value="${_escHtml(prefillName)}">
+            <div class="save-field-combo">
+              <input id="sp-pname" class="save-field-input" type="text" list="sp-pname-list"
+                     placeholder="Type name or choose from list"
+                     value="${safeName}" autocomplete="off">
+              <datalist id="sp-pname-list"></datalist>
+            </div>
+            <span class="save-field-hint">⚠️ Auto-assigned: <code>${safeName || 'unknown_participant_N'}</code>. Update if needed.</span>
           </div>
           <div class="save-field-group save-field-group--full">
             <label class="save-field-label" for="sp-notes">Notes</label>
             <textarea id="sp-notes" class="save-field-textarea"
                       placeholder="Optional: fatigue level, sleep hours, study condition…"
-                      rows="2">${_escHtml(prefillNote)}</textarea>
+                      rows="2"></textarea>
           </div>
         </div>
 
         <div class="save-panel-actions">
-          <button class="save-btn-primary" id="sp-save-btn">Save Record</button>
+          <button class="save-btn-primary" id="sp-confirm-btn">✓ Confirm</button>
           <span class="save-panel-spacer"></span>
-          <button class="save-btn-new-session" id="sp-new-session-btn">↳ New Session</button>
+          <button class="save-btn-discard" id="sp-discard-btn">🗑 Discard</button>
+          <button class="save-btn-new-session" id="sp-new-session-btn">↓ New Session</button>
         </div>
       </div>
     `;
 
     panel.style.display = '';
-    document.getElementById('sp-save-btn')
-      ?.addEventListener('click', _onSaveClicked);
+    document.getElementById('sp-confirm-btn')
+      ?.addEventListener('click', _onConfirmClicked);
+    document.getElementById('sp-discard-btn')
+      ?.addEventListener('click', _onDiscardClicked);
     document.getElementById('sp-new-session-btn')
       ?.addEventListener('click', _resetToIdle);
+
+    // Populate datalist if we already have the list
+    _populateDatalist(_knownParticipants);
   }
 
-  function _onSaveClicked() {
-    const pid = document.getElementById('sp-pid')?.value.trim() || '';
-    const pname = document.getElementById('sp-pname')?.value.trim() || '';
-    const notes = document.getElementById('sp-notes')?.value.trim() || '';
+  function _onParticipantsList(msg) {
+    _knownParticipants = msg.names || [];
+    _populateDatalist(_knownParticipants);
+  }
 
-    const btn = document.getElementById('sp-save-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  function _populateDatalist(names) {
+    const dl = document.getElementById('sp-pname-list');
+    if (!dl) return;
+    dl.innerHTML = names
+      .map(n => `<option value="${_escHtml(n)}">`)
+      .join('');
+  }
+
+  function _onConfirmClicked() {
+    const name  = document.getElementById('sp-pname')?.value.trim() || '';
+    const notes = document.getElementById('sp-notes')?.value.trim() || '';
+    const btn   = document.getElementById('sp-confirm-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
 
     LabReview.StreamRouter.send({
-      type: 'session.save_record',
-      participant_id: pid,
-      participant_name: pname,
+      type:             'db.confirm_session',
+      session_uuid:     _pendingSessionUuid,
+      participant_name: name,
       notes,
     });
   }
 
-  function _onRecordSaved(msg) {
+  function _onDiscardClicked() {
+    const btn = document.getElementById('sp-discard-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Discarding…'; }
+    if (!confirm('Discard this session? It will be deleted from the database and disk.')) {
+      if (btn) { btn.disabled = false; btn.textContent = '🗑 Discard'; }
+      return;
+    }
+    LabReview.StreamRouter.send({
+      type:         'db.discard_session',
+      session_uuid: _pendingSessionUuid,
+    });
+  }
+
+  function _onSessionSaved(msg) {
     const panel = document.getElementById('li-save-panel');
     if (!panel) return;
-
     if (msg.success) {
       panel.innerHTML = `
         <div class="save-panel-inner save-panel-inner--saved">
           <span class="save-panel-check">✓</span>
-          <span class="save-panel-saved-text">Session record saved.</span>
-          <button class="save-btn-new-session" id="sp-new-session-btn-ok">↳ New Session</button>
+          <span class="save-panel-saved-text">Session confirmed for <strong>${_escHtml(msg.participant_name)}</strong>.</span>
+          <button class="save-btn-new-session" id="sp-new-session-btn-ok">↓ New Session</button>
         </div>
       `;
       document.getElementById('sp-new-session-btn-ok')
         ?.addEventListener('click', _resetToIdle);
     } else {
-      const btn = document.getElementById('sp-save-btn');
-      if (btn) { btn.disabled = false; btn.textContent = 'Save Record'; }
+      const btn = document.getElementById('sp-confirm-btn');
+      if (btn) { btn.disabled = false; btn.textContent = '✓ Confirm'; }
+      console.error('[LiveIntel] db.confirm_session failed:', msg.detail);
+    }
+  }
+
+  function _onSessionDiscarded(msg) {
+    const panel = document.getElementById('li-save-panel');
+    if (!panel) return;
+    if (msg.success) {
+      panel.innerHTML = `
+        <div class="save-panel-inner save-panel-inner--discarded">
+          <span class="save-panel-check save-panel-check--discard">🗑</span>
+          <span class="save-panel-saved-text">Session discarded.</span>
+          <button class="save-btn-new-session" id="sp-new-session-btn-disc">↓ New Session</button>
+        </div>
+      `;
+      document.getElementById('sp-new-session-btn-disc')
+        ?.addEventListener('click', _resetToIdle);
+    } else {
+      const btn = document.getElementById('sp-discard-btn');
+      if (btn) { btn.disabled = false; btn.textContent = '🗑 Discard'; }
+    }
+  }
+
+  // Legacy record-saved compat
+  function _onLegacyRecordSaved(msg) {
+    const panel = document.getElementById('li-save-panel');
+    if (!panel) return;
+    if (msg.success) {
+      panel.innerHTML = `
+        <div class="save-panel-inner save-panel-inner--saved">
+          <span class="save-panel-check">✓</span>
+          <span class="save-panel-saved-text">Session record saved.</span>
+          <button class="save-btn-new-session" id="sp-new-session-btn-ok2">↓ New Session</button>
+        </div>
+      `;
+      document.getElementById('sp-new-session-btn-ok2')
+        ?.addEventListener('click', _resetToIdle);
+    } else {
       console.error('[LiveIntel] session_record save failed:', msg.error);
     }
   }
+
 
   // ── Results banner ────────────────────────────────────────────────────────
 

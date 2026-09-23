@@ -28,3 +28,7 @@ ANALYSIS_API_URL = cfg.get("analysis", {}).get("api_url", "http://127.0.0.1:8081
 
 # Where permanent session records (metadata + processed metrics) are written after operator saves.
 SESSION_DATA_DIR = str((HERE / cfg.get("session_data", {}).get("session_data_directory", "../data/SessionData")).resolve())
+
+# SQLite database file path
+DATABASE_PATH = str((HERE / cfg.get("database", {}).get("path", "../database/labreview.db")).resolve())
+

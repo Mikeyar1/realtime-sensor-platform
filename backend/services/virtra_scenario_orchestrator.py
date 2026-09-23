@@ -322,8 +322,8 @@ class VirTraScenarioOrchestrator:
             "simulator_system": event.scenario_display_name,
         }
         print(
-            f"[VirTraScenarioOrchestrator] ▶ Custom LSL Scenario Started: {event.scenario_name!r} "
-            f"→ drill_key={drill_info['drill_key']!r} task_type={task_type!r}"
+            f"[VirTraScenarioOrchestrator] > Custom LSL Scenario Started: {event.scenario_name!r} "
+            f"-> drill_key={drill_info['drill_key']!r} task_type={task_type!r}"
         )
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
 
@@ -354,15 +354,9 @@ class VirTraScenarioOrchestrator:
             biosignals=biosignals,
             drill_key=drill_info["drill_key"],
         )
-        asyncio.run_coroutine_threadsafe(
-            self._analysis_client.run_after_live_scenario(
-                drill_key=drill_info["drill_key"],
-                session_record=session_record,
-                scenario_name=scenario_name,
-            ),
-            self._loop,
-        )
 
+        # Build metadata BEFORE calling run_after_live_scenario so it receives
+        # the current session's values (not the previous session's or None).
         self._last_session_metadata = {
             "drill_key":      drill_info["drill_key"],
             "task_type":      drill_info.get("task_type", "GENERAL"),
@@ -374,7 +368,19 @@ class VirTraScenarioOrchestrator:
             "active_streams": list(self._active_streams_at_start),
             "participant_id":   self._participant_id,
             "participant_name": self._participant_name,
+            # Physiological snapshot captured at Scenario Stopped
+            "biosignals":       biosignals,
         }
+
+        asyncio.run_coroutine_threadsafe(
+            self._analysis_client.run_after_live_scenario(
+                drill_key=drill_info["drill_key"],
+                session_record=session_record,
+                scenario_name=scenario_name,
+                session_metadata=self._last_session_metadata,
+            ),
+            self._loop,
+        )
 
         print(f"[VirTraScenarioOrchestrator] ■ Custom LSL Scenario Stopped: {scenario_name!r}")
         self._active_custom_session = None
@@ -492,8 +498,8 @@ class VirTraScenarioOrchestrator:
             "simulator_system": self._simulator_system,
         }
 
-        print(f"[VirTraScenarioOrchestrator] ▶ Scenario Started: {scenario_name!r}"
-              f"  → drill_key={drill_info['drill_key']!r}"
+        print(f"[VirTraScenarioOrchestrator] > Scenario Started: {scenario_name!r}"
+              f"  -> drill_key={drill_info['drill_key']!r}"
               f"  task_type={drill_info.get('task_type', 'GENERAL')!r}")
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
 
@@ -521,8 +527,8 @@ class VirTraScenarioOrchestrator:
             "drill_key":     drill_key_for_analysis,
         }
 
-        print(f"[VirTraScenarioOrchestrator] ■ Scenario Stopped: {scenario_name!r}"
-              f"  → drill_key={drill_key_for_analysis!r}")
+        print(f"[VirTraScenarioOrchestrator] [] Scenario Stopped: {scenario_name!r}"
+              f"  -> drill_key={drill_key_for_analysis!r}")
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
 
         self._active_drill = None
@@ -571,17 +577,8 @@ class VirTraScenarioOrchestrator:
                    if task_type_for_analysis == "GNG" else {})
             )
 
-        if session_record is not None:
-            asyncio.run_coroutine_threadsafe(
-                self._analysis_client.run_after_live_scenario(
-                    drill_key=drill_key_for_analysis,
-                    session_record=session_record,
-                    scenario_name=scenario_name,
-                ),
-                self._loop,
-            )
-
-        # Capture all scenario metadata for the operator save form before resetting state
+        # Build metadata BEFORE calling run_after_live_scenario so it receives
+        # the current session's values (not the previous session's or None).
         self._last_session_metadata = {
             "drill_key":      drill_key_for_analysis,
             "task_type":      task_type_for_analysis,
@@ -594,7 +591,20 @@ class VirTraScenarioOrchestrator:
             # Participant info from LSL (may be empty strings if no Participant stream present)
             "participant_id":   self._participant_id,
             "participant_name": self._participant_name,
+            # Physiological snapshot captured at Scenario Stopped
+            "biosignals":       biosignals,
         }
+
+        if session_record is not None:
+            asyncio.run_coroutine_threadsafe(
+                self._analysis_client.run_after_live_scenario(
+                    drill_key=drill_key_for_analysis,
+                    session_record=session_record,
+                    scenario_name=scenario_name,
+                    session_metadata=self._last_session_metadata,
+                ),
+                self._loop,
+            )
 
         # Release tracker for next scenario (new one instantiated at Scenario Started)
         self._active_tracker = None

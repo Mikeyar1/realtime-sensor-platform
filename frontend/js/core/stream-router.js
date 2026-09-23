@@ -168,6 +168,26 @@ LabReview.StreamRouter = (function () {
         LabReview.EventBus.emit('weapon-info', msg);
         break;
 
+      // ── Database: participant list response ────────────────────────────────
+      case 'db.participants_list':
+        LabReview.EventBus.emit('db-participants-list', msg);
+        break;
+
+      // ── Database: session confirmed (name update + save acknowledged) ───────
+      case 'db.session_saved':
+        LabReview.EventBus.emit('db-session-saved', msg);
+        break;
+
+      // ── Database: session discarded (deleted from DB + disk) ─────────────────
+      case 'db.session_discarded':
+        LabReview.EventBus.emit('db-session-discarded', msg);
+        break;
+
+      // ── Database: participant name updated ───────────────────────────────────
+      case 'db.participant_updated':
+        LabReview.EventBus.emit('db-participant-updated', msg);
+        break;
+
       default:
         console.warn('[StreamRouter] Unknown message type:', msg.type);
     }
