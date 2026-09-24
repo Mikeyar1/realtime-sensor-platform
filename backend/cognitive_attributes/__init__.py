@@ -39,7 +39,6 @@ ATTRIBUTE_REGISTRY: dict[str, tuple] = {
     "PVT": (PvtTracker, _pvt_metrics),
        "GNG": (MulticolorGngTracker, _gng_metrics),
     "DISCRIMINATION": (DiscriminationTracker, _discrimination_metrics),
-    # "MARKSMANSHIP": (MarksmanshipTracker, _marksmanship_metrics),  ← add future attributes here
 }
 
 __all__ = ["ATTRIBUTE_REGISTRY"]

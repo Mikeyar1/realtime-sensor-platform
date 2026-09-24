@@ -52,12 +52,14 @@ def _compute_discrimination_metrics(trials: list[dict], wild_shots: int) -> dict
     nonthreat = [t for t in trials if t.get("target_class") == "nonthreat"]
 
     hits = [t for t in threat    if t.get("result") == HIT]
-    miss = [t for t in threat    if t.get("result") == MISS]
+    miss = [t for t in threat    if t.get("result") == MISS and t.get("shot_at") is not None]
+    omissions = [t for t in threat if t.get("result") == OMISSION or
+                 (t.get("result") == MISS and t.get("shot_at") is None)]
     fas  = [t for t in nonthreat if t.get("result") == FALSE_ALARM]
     crs  = [t for t in nonthreat if t.get("result") == CORRECT_REJECTION]
 
     n_threat, n_nonthreat = len(threat), len(nonthreat)
-    n_hit, n_miss, n_fa, n_cr = len(hits), len(miss), len(fas), len(crs)
+    n_hit, n_miss, n_omit, n_fa, n_cr = len(hits), len(miss), len(omissions), len(fas), len(crs)
     n_total = n_threat + n_nonthreat
 
     hit_rate = round(n_hit / n_threat * 100, 1) if n_threat else None
@@ -79,12 +81,17 @@ def _compute_discrimination_metrics(trials: list[dict], wild_shots: int) -> dict
         "total_trials":             n_total,
         "hits":                     n_hit,
         "misses":                   n_miss,
+        "omissions":                n_omit,
+        "commission_errors":        n_fa,
         "false_alarms":             n_fa,
         "correct_rejections":       n_cr,
 
         # Raw rates
         "hit_rate_pct":             hit_rate,
         "miss_rate_pct":            round(n_miss / n_threat * 100, 1) if n_threat else None,
+        "threat_hit_rate_pct":      hit_rate,
+        "threat_omission_rate_pct": round(n_omit / n_threat * 100, 1) if n_threat else None,
+        "commission_error_rate_pct": fa_rate,
         "false_alarm_rate_pct":     fa_rate,
         "correct_rejection_rate_pct": round(n_cr / n_nonthreat * 100, 1) if n_nonthreat else None,
         "discrimination_accuracy_pct": accuracy,
@@ -108,8 +115,14 @@ def compute_metrics(trials: list[dict],
                     duration_s: float | None = None,
                     wild_shots: int = 0) -> dict:
     """Core computation shared by live updates and the final summary."""
-    pvt_trials  = [t for t in trials if t.get("phase") == PHASE_PVT]
-    disc_trials = [t for t in trials if t.get("phase") == PHASE_DISC]
+    if duration_s is None and trials and all(t.get("completed_at") is not None for t in trials):
+        first = min(t.get("first_activated_at") or t["activated_at"] for t in trials)
+        last = max(t["completed_at"] for t in trials)
+        duration_s = round(last - first, 2)
+    unresolved_count = sum(1 for t in trials if t.get("result") == "unresolved")
+    scorable_trials = [t for t in trials if t.get("result") != "unresolved"]
+    pvt_trials  = [t for t in scorable_trials if t.get("phase") == PHASE_PVT]
+    disc_trials = [t for t in scorable_trials if t.get("phase") == PHASE_DISC]
 
     pvt_metrics = _compute_pvt_metrics(pvt_trials, lapse_multiplier=lapse_multiplier)
     disc_metrics = _compute_discrimination_metrics(disc_trials, wild_shots)
@@ -128,9 +141,11 @@ def compute_metrics(trials: list[dict],
     ]
 
     return {
-        "total_trials":   len(trials),
+        "total_trials":   disc_metrics["total_trials"],
         "duration_s":     duration_s,
+        "duration_basis":  "first_to_last_trial",
         "wild_shots":     wild_shots,
+        "unresolved_trials": unresolved_count,
         "pvt":            pvt_metrics,
         "discrimination": disc_metrics,
         "timeline":       timeline,

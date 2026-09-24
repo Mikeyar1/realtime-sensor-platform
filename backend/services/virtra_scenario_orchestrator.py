@@ -20,11 +20,13 @@ import re
 import sys
 from typing import Callable, Optional
 
+from pylsl import local_clock
+
 from .drill_definition_registry import DrillDefinitionRegistry
 from .biosignal_rolling_monitor import BiosignalRollingMonitor
 from .analysis_service_client import AnalysisServiceClient
 from cognitive_attributes import ATTRIBUTE_REGISTRY
-from virtra_custom_lsl.event_decoder import decode_custom_lsl_sample
+from virtra_custom_lsl.event_decoder import CustomLslEvent, decode_custom_lsl_sample
 from virtra_custom_lsl.session import CustomLslSessionBase
 
 # Native VirTra machine stream: name "V_300", type "VirTraEvents".
@@ -142,6 +144,8 @@ class VirTraScenarioOrchestrator:
         self._active_custom_scenario: str = ""
         self._custom_session_started_at: Optional[float] = None
         self._custom_session_id: str = ""
+        self._custom_simulator: str = ""
+        self._custom_simulator_system: str = ""
 
         # Biosignal rolling monitor
         self._biosignals = BiosignalRollingMonitor(broadcast_fn=broadcast_fn, loop=loop)
@@ -245,7 +249,7 @@ class VirTraScenarioOrchestrator:
             "category":    category,
             "metadata":    metadata_dict,
             "timestamp":   timestamp,
-            "drill_key":   self._active_drill["drill_key"] if self._active_drill else "general",
+            "drill_key":   self._active_drill["drill_key"] if self._active_drill else "",
         }
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
 
@@ -301,6 +305,11 @@ class VirTraScenarioOrchestrator:
         self._active_custom_scenario = event.scenario_name
         self._custom_session_started_at = timestamp
         self._custom_session_id = event.scenario_id
+        # The custom stream's scenario_display_name names the drill, not the
+        # simulator system. Only show simulator fields if the event supplies them.
+        context = event.data if isinstance(event.data, dict) else {}
+        self._custom_simulator = str(context.get("simulator") or "")
+        self._custom_simulator_system = str(context.get("simulator_system") or "")
         self._active_custom_session = TrackerClass(broadcast_fn=self._broadcast, loop=self._loop)
         self._active_custom_session.reset(
             params=drill_info.get("params", {}),
@@ -318,8 +327,8 @@ class VirTraScenarioOrchestrator:
             "task_type":     task_type,
             "targets":       drill_info.get("targets", {}),
             "tracked_events": [],
-            "simulator":     "VirTra Custom LSL",
-            "simulator_system": event.scenario_display_name,
+            "simulator":     self._custom_simulator,
+            "simulator_system": self._custom_simulator_system,
         }
         print(
             f"[VirTraScenarioOrchestrator] > Custom LSL Scenario Started: {event.scenario_name!r} "
@@ -327,7 +336,7 @@ class VirTraScenarioOrchestrator:
         )
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
 
-    def _handle_custom_lsl_scenario_stopped(self, timestamp: float, event):
+    def _handle_custom_lsl_scenario_stopped(self, timestamp: float, event, manual: bool = False):
         if self._active_custom_session is None or self._active_custom_drill is None:
             return
 
@@ -342,6 +351,7 @@ class VirTraScenarioOrchestrator:
             "session_id":    session_id,
             "timestamp":     timestamp,
             "drill_key":     drill_info["drill_key"],
+            "manual":        manual,
         }
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
 
@@ -359,12 +369,12 @@ class VirTraScenarioOrchestrator:
         # the current session's values (not the previous session's or None).
         self._last_session_metadata = {
             "drill_key":      drill_info["drill_key"],
-            "task_type":      drill_info.get("task_type", "GENERAL"),
+            "task_type":      drill_info["task_type"],
             "scenario_name":  scenario_name,
             "session_id":     session_id,
             "started_at":     started_at,
             "stopped_at":     timestamp,
-            "duration_s":     round(timestamp - started_at, 2),
+            "duration_s":     session_record.get("duration_s"),
             "active_streams": list(self._active_streams_at_start),
             "participant_id":   self._participant_id,
             "participant_name": self._participant_name,
@@ -382,12 +392,14 @@ class VirTraScenarioOrchestrator:
             self._loop,
         )
 
-        print(f"[VirTraScenarioOrchestrator] ■ Custom LSL Scenario Stopped: {scenario_name!r}")
+        print(f"[VirTraScenarioOrchestrator] Custom LSL Scenario Stopped: {scenario_name!r}")
         self._active_custom_session = None
         self._active_custom_drill = None
         self._active_custom_scenario = ""
         self._custom_session_started_at = None
         self._custom_session_id = ""
+        self._custom_simulator = ""
+        self._custom_simulator_system = ""
 
     def on_catalog_changed(self, catalog: list):
         """Track active stream names for session metadata capture."""
@@ -445,6 +457,10 @@ class VirTraScenarioOrchestrator:
         if drill_info is None:
             return
 
+        if drill_info["task_type"] not in ATTRIBUTE_REGISTRY:
+            print(f"[VirTraScenarioOrchestrator] Unsupported task type: {drill_info['task_type']!r}")
+            return
+
         already_active = (
             self._active_scenario == scenario_name
             and self._active_drill is not None
@@ -472,17 +488,22 @@ class VirTraScenarioOrchestrator:
                     # Tracker does not accept 'targets' (e.g. PVT) — call without it
                     self._active_tracker.reset(params=drill_info.get("params", {}))
             else:
-                # Unimplemented cognitive attribute (e.g. MARKSMANSHIP) — track events only
-                self._active_tracker = None
-                print(f"[VirTraScenarioOrchestrator] No tracker for task_type={task_type!r} — events captured only")
+                print(f"[VirTraScenarioOrchestrator] No tracker for task_type={task_type!r} — ignoring scenario")
+                return
             self._biosignals.reset()
             self._session_started_at = timestamp
             self._session_id = _parse_metadata_field(metadata_raw, "SessionID") or ""
             self._weapon_type_seen = False
 
         # Parse simulator context from this event's metadata
-        self._simulator        = _parse_metadata_field(metadata_raw, "Simulator") or ""
-        self._simulator_system = _parse_metadata_field(metadata_raw, "SimulatorSystem") or ""
+        self._simulator = (
+            _parse_metadata_field(metadata_raw, "Simulator")
+            or (self._simulator if already_active else "")
+        )
+        self._simulator_system = (
+            _parse_metadata_field(metadata_raw, "SimulatorSystem")
+            or (self._simulator_system if already_active else "")
+        )
 
         msg = {
             "type":             "session.scenario_started",
@@ -491,7 +512,7 @@ class VirTraScenarioOrchestrator:
             "timestamp":        timestamp,
             "drill_key":        drill_info["drill_key"],
             "drill_label":      drill_info["label"],
-            "task_type":        drill_info.get("task_type", "GENERAL"),
+            "task_type":        drill_info["task_type"],
             "targets":          drill_info.get("targets", {}),
             "tracked_events":   self._registry.all_tracked_events_for(drill_info["drill_key"]),
             "simulator":        self._simulator,
@@ -500,10 +521,10 @@ class VirTraScenarioOrchestrator:
 
         print(f"[VirTraScenarioOrchestrator] > Scenario Started: {scenario_name!r}"
               f"  -> drill_key={drill_info['drill_key']!r}"
-              f"  task_type={drill_info.get('task_type', 'GENERAL')!r}")
+              f"  task_type={drill_info['task_type']!r}")
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
 
-    def _handle_scenario_stopped(self, timestamp: float, metadata_raw: str):
+    def _handle_scenario_stopped(self, timestamp: float, metadata_raw: str, manual: bool = False):
         # If no registered session was ever started, ignore the stop event
         if self._active_drill is None:
             print("[VirTraScenarioOrchestrator] Scenario Stopped received but no active registered session — ignoring")
@@ -512,12 +533,8 @@ class VirTraScenarioOrchestrator:
         scenario_name = _parse_metadata_field(metadata_raw, "Scenario") or self._active_scenario or ""
         session_id = _parse_metadata_field(metadata_raw, "SessionID") or self._session_id
 
-        drill_key_for_analysis = (
-            self._active_drill["drill_key"] if self._active_drill else "general"
-        )
-        task_type_for_analysis = (
-            self._active_drill.get("task_type", "GENERAL") if self._active_drill else "GENERAL"
-        )
+        drill_key_for_analysis = self._active_drill["drill_key"]
+        task_type_for_analysis = self._active_drill["task_type"]
 
         msg = {
             "type":          "session.scenario_stopped",
@@ -525,6 +542,7 @@ class VirTraScenarioOrchestrator:
             "session_id":    session_id,
             "timestamp":     timestamp,
             "drill_key":     drill_key_for_analysis,
+            "manual":        manual,
         }
 
         print(f"[VirTraScenarioOrchestrator] [] Scenario Stopped: {scenario_name!r}"
@@ -586,7 +604,7 @@ class VirTraScenarioOrchestrator:
             "session_id":     session_id,
             "started_at":     self._session_started_at or timestamp,
             "stopped_at":     timestamp,
-            "duration_s":     round(timestamp - (self._session_started_at or timestamp), 2),
+            "duration_s":     session_record.get("duration_s") if session_record else None,
             "active_streams": list(self._active_streams_at_start),
             # Participant info from LSL (may be empty strings if no Participant stream present)
             "participant_id":   self._participant_id,
@@ -611,6 +629,22 @@ class VirTraScenarioOrchestrator:
         self._session_started_at = None
         self._session_id = ""
 
+    def stop_active_drill(self) -> bool:
+        """Finalize the active drill through the same path as a VirTra stop event."""
+        timestamp = local_clock()
+        if self._active_custom_session is not None and self._active_custom_drill is not None:
+            event = CustomLslEvent(
+                event_name="Scenario Stopped",
+                scenario_name=self._active_custom_scenario,
+                scenario_id=self._custom_session_id,
+            )
+            self._handle_custom_lsl_scenario_stopped(timestamp, event, manual=True)
+            return True
+        if self._active_drill is not None:
+            self._handle_scenario_stopped(timestamp, "", manual=True)
+            return True
+        return False
+
     def get_active_drill_state(self) -> dict | None:
         """Return active drill metadata for reconnecting clients."""
         if self._active_drill is None and self._active_custom_drill is not None:
@@ -621,9 +655,11 @@ class VirTraScenarioOrchestrator:
                 "timestamp":      self._custom_session_started_at or 0.0,
                 "drill_key":      self._active_custom_drill["drill_key"],
                 "drill_label":    self._active_custom_drill["label"],
-                "task_type":      self._active_custom_drill.get("task_type", "GENERAL"),
+                "task_type":      self._active_custom_drill["task_type"],
                 "targets":        self._active_custom_drill.get("targets", {}),
                 "tracked_events": [],
+                "simulator":      self._custom_simulator,
+                "simulator_system": self._custom_simulator_system,
                 "replayed":       True,
             }
         if self._active_drill is None:
@@ -635,9 +671,11 @@ class VirTraScenarioOrchestrator:
             "timestamp":      self._session_started_at or 0.0,
             "drill_key":      self._active_drill["drill_key"],
             "drill_label":    self._active_drill["label"],
-            "task_type":      self._active_drill.get("task_type", "GENERAL"),
+            "task_type":      self._active_drill["task_type"],
             "targets":        self._active_drill.get("targets", {}),
             "tracked_events": self._registry.all_tracked_events_for(self._active_drill["drill_key"]),
+            "simulator":     self._simulator,
+            "simulator_system": self._simulator_system,
             "inferred":       self._active_drill.get("inferred", False),
             "replayed":       True,
         }

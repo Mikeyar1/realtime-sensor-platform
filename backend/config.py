@@ -32,3 +32,7 @@ SESSION_DATA_DIR = str((HERE / cfg.get("session_data", {}).get("session_data_dir
 # SQLite database file path
 DATABASE_PATH = str((HERE / cfg.get("database", {}).get("path", "../database/labreview.db")).resolve())
 
+# Embedded frontend HTTP server
+FRONTEND_PORT = int(cfg.get("frontend", {}).get("port", 3000))
+OPEN_BROWSER  = bool(cfg.get("frontend", {}).get("open_browser", True))
+

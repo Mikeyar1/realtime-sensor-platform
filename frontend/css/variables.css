@@ -3,7 +3,7 @@
   --bg-root: #F0F2F5;
   --bg-surface: #FFFFFF;
   --bg-panel: #FFFFFF;
-  --bg-sidebar: #1B2A4A;
+  --bg-sidebar: #192e4d;
   --bg-topbar: #FFFFFF;
   --bg-input: #F5F6F8;
   --bg-hover: #E8EBF0;
@@ -93,7 +93,7 @@
   --space-3xl: 32px;
 
   /* ── Layout Dimensions ── */
-  --sidebar-width: 230px;
+  --sidebar-width: 296px;
   --topbar-height: 52px;
   --timeline-height: 150px;
   --panel-gap: 12px;

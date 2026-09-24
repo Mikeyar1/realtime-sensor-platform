@@ -312,11 +312,12 @@ body {
 
 /* ── Sidebar (dark) ── */
 #sidebar {
-  background: var(--bg-sidebar);
+  background: linear-gradient(145deg, #233d5c 0%, var(--bg-sidebar) 36%, #172b48 100%);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: var(--space-lg) 0;
+  padding: 0 0 16px;
+  border-right: 3px solid #158de8;
 }
 
 #sidebar::-webkit-scrollbar {
@@ -330,22 +331,25 @@ body {
 
 /* Nav */
 .sidebar-nav {
-  padding: 0 var(--space-md);
+  padding: 0 12px;
+  margin-top: 52px;
   margin-bottom: var(--space-xl);
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 8px var(--space-lg);
-  border-radius: 5px;
+  gap: 14px;
+  min-height: 50px;
+  padding: 8px 16px;
+  border-radius: 12px;
   cursor: pointer;
   color: var(--sidebar-text);
-  font-size: var(--font-size-sm);
+  font-size: 14px;
   font-weight: 500;
   transition: background var(--transition-fast), color var(--transition-fast);
   user-select: none;
-  margin-bottom: 2px;
+  margin-bottom: 5px;
 }
 
 .nav-item:hover {
@@ -357,18 +361,26 @@ body {
   background: var(--sidebar-active-bg);
   color: var(--sidebar-active-text);
   font-weight: 600;
+  box-shadow: inset 3px 0 #4ddbc9;
 }
+.nav-item:focus-visible { outline: 2px solid #4ddbc9; outline-offset: 2px; }
+
+.nav-icon { width: 20px; height: 20px; flex-shrink: 0; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ── DNLC brand title ── */
 .sidebar-brand {
-  font-family: var(--font-family);
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: rgba(255, 255, 255, 0.92);
-  padding: 4px var(--space-lg) 22px calc(var(--space-lg) + var(--space-md));
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: #fff;
+  padding: 35px 22px 0;
   user-select: none;
 }
+.sidebar-brand__mark { width: 46px; height: 46px; display: grid; place-items: center; flex-shrink: 0; border-radius: 14px; background: #18cbb8; color: #062d39; }
+.sidebar-brand__mark svg { width: 28px; height: 28px; }
+.sidebar-brand__text { display: flex; flex-direction: column; gap: 5px; }
+.sidebar-brand__text strong { font-size: 20px; line-height: 1; letter-spacing: -.02em; }
+.sidebar-brand__eyebrow { color: #69eadc; font-size: 12px; font-weight: 800; letter-spacing: .18em; }
 
 /* ── Bold modifier for core nav items (Overview, Analysis) ── */
 .nav-label--bold {
@@ -450,8 +462,8 @@ body {
    ══════════════════════════════════════════════════════════════ */
 
 .sidebar-streams {
-  margin-top: auto;                  /* push to bottom of sidebar */
-  border-top: 1px solid var(--sidebar-divider);
+  margin: auto 12px 0;
+  border-top: 0;
   flex-shrink: 0;
 }
 
@@ -462,7 +474,7 @@ body {
   width: 100%;
   background: none;
   border: none;
-  padding: var(--space-sm) var(--space-md) var(--space-sm) calc(var(--space-lg) + var(--space-md));
+  padding: 0 14px 12px;
   cursor: pointer;
   gap: var(--space-sm);
   transition: background var(--transition-fast);
@@ -473,7 +485,7 @@ body {
 }
 
 .sidebar-streams__title {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -490,10 +502,13 @@ body {
 }
 
 .sidebar-streams__body {
-  padding: var(--space-xs) 0 var(--space-sm);
+  padding: 8px 0;
   max-height: 220px;
   overflow-y: auto;
   transition: max-height var(--transition-normal);
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 15px;
 }
 
 .sidebar-streams__body::-webkit-scrollbar { width: 3px; }
@@ -548,8 +563,8 @@ body {
 }
 
 .sidebar-stream-empty {
-  font-size: 11px;
-  color: var(--sidebar-text-dim);
+  font-size: 13px;
+  color: #aebed1;
   padding: var(--space-sm) var(--space-lg);
   line-height: 1.5;
   opacity: 0.7;
@@ -848,14 +863,21 @@ body {
 
 /* Section group headers: "LIVE" / "POST-SESSION" */
 .sidebar-section-label {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.28);
-  padding: 8px var(--space-lg) 4px calc(var(--space-lg) + var(--space-md));
+  color: #9eafc4;
+  padding: 8px 14px 12px;
   user-select: none;
   pointer-events: none;
+}
+
+/* Thin horizontal separator between nav groups */
+.nav-divider {
+  height: 1px;
+  background: var(--sidebar-divider);
+  margin: var(--space-sm) var(--space-lg);
 }
 
 /* Small colored accent dots before nav labels */

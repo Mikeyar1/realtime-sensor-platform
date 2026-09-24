@@ -15,6 +15,7 @@
   <!-- Page CSS (feature-based) -->
   <link rel="stylesheet" href="css/pages/topbar.css" />
   <link rel="stylesheet" href="css/pages/live-intel.css" />
+  <link rel="stylesheet" href="css/pages/perf-review.css" />
 
   <!-- AAR Dashboard -->
   <link rel="stylesheet" href="js/features/aar/aar-dashboard.css" />
@@ -36,18 +37,25 @@
 
       <!-- Sidebar -->
       <aside id="sidebar">
-        <!-- Brand title -->
-        <div class="sidebar-brand">LabReview</div>
+        <div class="sidebar-brand">
+          <span class="sidebar-brand__mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none"><path d="M3 16h6l3-7 5 15 4-8h8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="sidebar-brand__text"><span class="sidebar-brand__eyebrow">VIRTRA</span><strong>LabReview</strong></span>
+        </div>
 
         <!-- Navigation -->
         <nav class="sidebar-nav">
+          <div class="sidebar-section-label">Workspace</div>
 
-          <!-- LIVE group -->
-          <div class="sidebar-section-label">LIVE</div>
+          <div class="nav-item active" data-page="live-intel" id="nav-live-intel" role="button" tabindex="0">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>
+            <span class="nav-label">Live performance</span>
+          </div>
 
-          <div class="nav-item active" data-page="live-intel" id="nav-live-intel">
-            <span class="nav-dot"></span>
-            <span class="nav-label">Live Human Performance</span>
+          <div class="nav-item" data-page="perf-review" id="nav-perf-review" role="button" tabindex="0">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>
+            <span class="nav-label">Session History</span>
           </div>
 
         </nav>
@@ -63,7 +71,7 @@
 
           <div class="sidebar-streams__body" id="sidebar-streams-body">
             <div class="sidebar-stream-list" id="sidebar-stream-list">
-              <span class="sidebar-stream-empty">No streams detected.</span>
+              <span class="sidebar-stream-empty">No mapped streams detected.</span>
             </div>
           </div>
 
@@ -76,6 +84,10 @@
 
         <div class="page active" id="page-live-intel">
           <!-- Populated by LiveIntelPage -->
+        </div>
+
+        <div class="page" id="page-perf-review">
+          <!-- Populated by PerfReviewPage -->
         </div>
 
       </main>
@@ -138,10 +150,7 @@
 
   <!-- AAR Dashboard: router + task-type display modules -->
   <!-- To add a new task type: create task-types/<name>.js and add one line here -->
-  <script src="js/features/aar/task-types/general.js"></script>
-  <script src="js/features/aar/task-types/gng.js"></script>
-  <script src="js/features/aar/task-types/pvt.js"></script>
-  <script src="js/features/aar/task-types/discrimination.js"></script>
+  <script src="js/features/aar/standardized.js"></script>
   <script src="js/features/aar/aar-dashboard.js"></script>
 
   <!-- Config: stream display registry + drill metric card registry -->
@@ -153,6 +162,7 @@
 
   <!-- Page controllers -->
   <script src="js/pages/live-intel.js"></script>
+  <script src="js/pages/perf-review.js"></script>
 
   <!-- App bootstrap (must be last; type=module defers automatically) -->
   <script type="module" src="js/app.js"></script>

@@ -2,19 +2,9 @@
  * aar-dashboard.css
  *
  * Styles for the After Action Review card layout.
- * Used by all task-type modules (GNG, PVT, General).
+ * Shared by PVT, Go/No-Go, and Behavioral Discrimination.
  *
- * Structure:
- *   .aar-panel          — full panel container
- *   .aar-header         — scenario name + badge
- *   .aar-section        — labelled metric group
- *   .aar-grid           — responsive card grid (2 or 3 col)
- *   .aar-card           — individual metric card
- *   .aar-info-btn       — ℹ hover tooltip trigger
- *   .aar-alert-row      — prominent alert row (false alarm warning etc.)
- *   .aar-chart-wrap     — chart container (speed-accuracy, RT trend)
- *   .aar-phys-section   — physiological signals placeholder
- *   .aar-waiting        — waiting state before scenario starts
+ * The three drills share .aar-standard card and section styles.
  */
 
 /* ── Panel shell ─────────────────────────────────────────────────────────── */
@@ -80,7 +70,6 @@
 
 .aar-task-badge--gng   { background: rgba(167,139,250,0.15); color: #a78bfa; border-color: rgba(167,139,250,0.25); }
 .aar-task-badge--pvt   { background: rgba(52,211,153,0.15);  color: #34d399; border-color: rgba(52,211,153,0.25);  }
-.aar-task-badge--general { background: rgba(156,163,175,0.12); color: #9ca3af; border-color: rgba(156,163,175,0.2); }
 
 /* ── Section label ───────────────────────────────────────────────────────── */
 
@@ -383,161 +372,62 @@
   color:     var(--text-muted);
 }
 
-/* ── General module: event summary table ─────────────────────────────────── */
-
-.aar-gen-event-table {
-  display:        flex;
-  flex-direction: column;
-  gap:            2px;
-  border-radius:  var(--radius-md, 10px);
-  overflow:       hidden;
-  border:         1px solid var(--border-subtle, rgba(255,255,255,0.07));
+/* Three-drill light card system */
+.aar-standard { gap: var(--space-xl); }
+.aar-standard .aar-header { padding-bottom: 0; }
+.aar-standard .aar-construct {
+  margin: calc(-1 * var(--space-md)) 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
 }
-
-.aar-gen-event-row {
-  display:         flex;
-  justify-content: space-between;
-  align-items:     center;
-  padding:         7px 12px;
-  background:      var(--surface-card, rgba(255,255,255,0.03));
-  border-bottom:   1px solid var(--border-subtle, rgba(255,255,255,0.05));
-  transition:      background 0.15s;
+.aar-standard .aar-section { gap: var(--space-md); }
+.aar-standard .aar-section + .aar-section {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-xl);
 }
-
-.aar-gen-event-row:last-child {
-  border-bottom: none;
+.aar-standard .aar-section-label {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  color: var(--text-secondary);
 }
-
-.aar-gen-event-row:hover {
-  background: rgba(255,255,255,0.05);
+.aar-standard .aar-grid {
+  grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+  gap: var(--space-md);
 }
-
-.aar-gen-event-name {
-  font-size:  0.82rem;
-  color:      var(--text-secondary);
+.aar-standard .aar-card {
+  min-height: 100px;
+  padding: var(--space-lg);
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  box-shadow: var(--shadow-panel);
 }
-
-.aar-gen-event-count {
-  font-size:   0.82rem;
+.aar-standard .aar-card-value {
+  font-size: 1.5rem;
   font-weight: 700;
-  color:       var(--text-primary);
-  background:  rgba(255,255,255,0.06);
-  border:      1px solid rgba(255,255,255,0.08);
-  border-radius: 999px;
-  padding:     2px 9px;
-  min-width:   28px;
-  text-align:  center;
+  color: var(--text-primary);
 }
-
-/* ── General module: catch-all key-value rows ───────────────────────────── */
-
-.aar-gen-kv-list {
-  display:        flex;
-  flex-direction: column;
-  gap:            1px;
+.aar-standard .aar-card-label { font-size: var(--font-size-sm); }
+.aar-standard .aar-info-btn::after {
+  background: #fff;
+  color: var(--text-primary);
+  border-color: var(--border-medium);
+  box-shadow: var(--shadow-popup);
 }
-
-.aar-gen-kv-row {
-  display:         flex;
-  justify-content: space-between;
-  align-items:     center;
-  padding:         6px 4px;
-  border-bottom:   1px solid var(--border-subtle, rgba(255,255,255,0.04));
+.aar-standard .aar-info-btn:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
 }
-
-.aar-gen-kv-row:last-child {
-  border-bottom: none;
+.aar-standard .aar-info-btn:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
 }
-
-.aar-gen-kv-label {
-  font-size: 0.82rem;
-  color:     var(--text-secondary);
+.aar-standard .aar-task-badge {
+  color: var(--accent-teal);
+  background: #eaf8f6;
+  border-color: #ccece7;
 }
-
-.aar-gen-kv-value {
-  font-size:   0.82rem;
-  font-weight: 600;
-  color:       var(--text-primary);
-}
-
-/* ── Export row ──────────────────────────────────────────────────────────── */
-
-.aar-export-row {
-  display:     flex;
-  align-items: center;
-  gap:         var(--space-md);
-  padding-top: var(--space-sm);
-}
-
-.aar-export-btn {
-  background:    var(--surface-card, rgba(255,255,255,0.06));
-  border:        1px solid var(--border-subtle, rgba(255,255,255,0.12));
-  border-radius: var(--radius-sm, 6px);
-  color:         var(--text-secondary);
-  font-size:     0.8rem;
-  padding:       6px 14px;
-  cursor:        pointer;
-  transition:    background 0.15s, color 0.15s;
-}
-
-.aar-export-btn:hover {
-  background: rgba(255,255,255,0.1);
-  color:      var(--text-primary);
-}
-
-.aar-export-hint {
-  font-size: 0.75rem;
-  color:     var(--text-muted);
-}
-
-/* ── General module: live event feed ─────────────────────────────────────── */
-
-.aar-gen-feed {
-  display:        flex;
-  flex-direction: column;
-  gap:            4px;
-  max-height:     220px;
-  overflow-y:     auto;
-  border:         1px solid var(--border-subtle, rgba(255,255,255,0.07));
-  border-radius:  var(--radius-md, 10px);
-  padding:        6px;
-  background:     var(--surface-card, rgba(255,255,255,0.02));
-}
-
-.aar-gen-feed-item {
-  display:       flex;
-  align-items:   center;
-  gap:           8px;
-  padding:       5px 8px;
-  border-radius: 6px;
-  background:    rgba(255,255,255,0.02);
-  font-size:     0.78rem;
-}
-
-.aar-gen-feed-time {
-  color:       var(--text-muted);
-  font-family: monospace;
-  font-size:   0.72rem;
-  min-width:   48px;
-}
-
-.aar-gen-feed-badge {
-  padding:       1px 6px;
-  border-radius: 4px;
-  font-weight:   600;
-  font-size:     0.7rem;
-  background:    rgba(255,255,255,0.08);
-}
-
-.aar-gen-feed-badge--shot   { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
-.aar-gen-feed-badge--hit    { background: rgba(52, 211, 153, 0.2);  color: #34d399; }
-.aar-gen-feed-badge--miss   { background: rgba(239, 68, 68, 0.2);   color: #f87171; }
-.aar-gen-feed-badge--target { background: rgba(99, 102, 241, 0.2);  color: #818cf8; }
-
-.aar-gen-feed-desc {
-  color:         var(--text-secondary);
-  overflow:      hidden;
-  text-overflow: ellipsis;
-  white-space:   nowrap;
-  flex:          1;
+@media (max-width: 700px) {
+  .aar-standard .aar-grid { grid-template-columns: 1fr; }
 }

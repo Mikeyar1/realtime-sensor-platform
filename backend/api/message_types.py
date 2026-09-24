@@ -53,6 +53,15 @@ MSG_DB_SESSION_SAVED       = "db.session_saved"       # {session_uuid, participa
 MSG_DB_SESSION_DISCARDED   = "db.session_discarded"   # {session_uuid, success}
 MSG_DB_PARTICIPANT_UPDATED = "db.participant_updated" # {old_name, new_name, success}
 
+# Performance Review — Session History (Client -> Server)
+MSG_PERF_QUERY  = "perf.query"   # {participant_name, drill_key?, limit?}
+MSG_PERF_DELETE_SESSION = "perf.delete_session"  # {participant_name, session_uuid}
+MSG_PERF_DELETE_PARTICIPANT = "perf.delete_participant"  # {participant_name}
+
+# Performance Review — Session History (Server -> Client)
+MSG_PERF_RESULT = "perf.result"  # {participant_name, drill_key, sessions: [...]}
+MSG_PERF_DELETE_RESULT = "perf.delete_result"  # {operation, participant_name, success, deleted_count}
+
 
 # Real-time VirTra event (broadcast by LiveService on every VirTra sample)
 MSG_VIRTRA_EVENT         = "session.virtra_event"

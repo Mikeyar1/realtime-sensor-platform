@@ -19,9 +19,7 @@ export const SIGNALS = ['hr', 'pupil', 'motion'];
 /** Drill definitions: key, short label, long label.
  * Keys match config/drill_registry.toml drill keys exactly. */
 export const DRILLS = [
-  { key: 'general',                   label: 'General',     longLabel: 'General' },
   { key: 'behavioral_discrimination', label: 'BehDisc',     longLabel: 'Behavioral Discrimination' },
   { key: 'pvt',                       label: 'PVT',         longLabel: 'Psychomotor Vigilance Task' },
-  { key: 'inhibition_assessment',     label: 'Inhibition',  longLabel: 'Inhibition Assessment' },
-  { key: 'marksmanship',              label: 'Marksmanship',longLabel: 'Marksmanship' },
+  { key: 'gng',                       label: 'Go/No-Go',    longLabel: 'Go/No-Go Task' },
 ];

@@ -106,6 +106,10 @@ CREATE INDEX IF NOT EXISTS idx_biosignals_session
     ON biosignals(session_id);
 """
 
+# Auto-saved sessions without a participant share this internal placeholder until
+# the operator confirms a name. It is never offered as a participant name.
+UNASSIGNED_PARTICIPANT = "__unassigned__"
+
 # ── Connection helper ─────────────────────────────────────────────────────────
 
 def _connect() -> sqlite3.Connection:
@@ -131,6 +135,16 @@ def init_db(db_path: str) -> None:
     with _lock:
         with _connect() as conn:
             conn.executescript(_DDL)
+            conn.execute(
+                """DELETE FROM participants
+                   WHERE (participant_name LIKE 'unknown_participant_%'
+                          OR participant_name = ?)
+                   AND NOT EXISTS (
+                       SELECT 1 FROM sessions WHERE sessions.participant_id = participants.id
+                   )""",
+                (UNASSIGNED_PARTICIPANT,),
+            )
+            conn.commit()
     print(f"[database] Initialized: {db_path}")
 
 
@@ -139,7 +153,11 @@ def get_all_participant_names() -> list[str]:
     with _lock:
         with _connect() as conn:
             rows = conn.execute(
-                "SELECT participant_name FROM participants ORDER BY participant_name COLLATE NOCASE"
+                """SELECT participant_name FROM participants p
+                   WHERE participant_name <> ?
+                   AND EXISTS (SELECT 1 FROM sessions s WHERE s.participant_id = p.id)
+                   ORDER BY participant_name COLLATE NOCASE""",
+                (UNASSIGNED_PARTICIPANT,),
             ).fetchall()
     return [r["participant_name"] for r in rows]
 
@@ -152,8 +170,9 @@ def next_unknown_name() -> str:
     with _lock:
         with _connect() as conn:
             rows = conn.execute(
-                "SELECT participant_name FROM participants "
-                "WHERE participant_name LIKE 'unknown_participant_%' COLLATE NOCASE"
+                """SELECT participant_name FROM participants p
+                   WHERE participant_name LIKE 'unknown_participant_%' COLLATE NOCASE
+                   AND EXISTS (SELECT 1 FROM sessions s WHERE s.participant_id = p.id)"""
             ).fetchall()
     max_n = 0
     for row in rows:
@@ -174,7 +193,7 @@ def get_or_create_participant(name: str) -> str:
     """
     name = (name or "").strip()
     if not name:
-        name = next_unknown_name()
+        name = UNASSIGNED_PARTICIPANT
 
     with _lock:
         with _connect() as conn:
@@ -206,7 +225,7 @@ def insert_session(
     Insert a complete session record (session + trials + biosignals) in one transaction.
 
     Args:
-        participant_name:  Name to link (will be created if new / unknown).
+        participant_name:  Name to link (uses a shared unassigned placeholder if empty).
         session_metadata:  Dict from VirTraScenarioOrchestrator._last_session_metadata.
                            Expected keys: session_id, drill_key, task_type, scenario_name,
                            started_at, stopped_at, duration_s, active_streams, notes,
@@ -218,7 +237,7 @@ def insert_session(
         The new sessions.id (integer), or None if the insert failed.
     """
     if not participant_name or not participant_name.strip():
-        participant_name = next_unknown_name()
+        participant_name = UNASSIGNED_PARTICIPANT
 
     participant_uuid = get_or_create_participant(participant_name)
 
@@ -345,6 +364,8 @@ def update_participant_name(session_uuid: str, new_name: str) -> tuple[bool, str
     new_name = (new_name or "").strip()
     if not new_name:
         return False, "Name cannot be empty"
+    if new_name.casefold() == UNASSIGNED_PARTICIPANT.casefold():
+        return False, "Choose a participant name"
 
     with _lock:
         with _connect() as conn:
@@ -444,6 +465,68 @@ def delete_session(session_uuid: str) -> bool:
     return True
 
 
+def delete_history_session(session_uuid: str, participant_name: str) -> bool:
+    """Delete one saved session only when it belongs to the named participant."""
+    if not session_uuid or not participant_name:
+        return False
+    with _lock:
+        with _connect() as conn:
+            row = conn.execute(
+                """SELECT s.id, s.record_path, s.participant_id
+                   FROM sessions s JOIN participants p ON p.id = s.participant_id
+                   WHERE s.session_uuid = ? AND p.participant_name = ? COLLATE NOCASE""",
+                (session_uuid, participant_name),
+            ).fetchone()
+            if row is None:
+                return False
+            conn.execute("DELETE FROM sessions WHERE id = ?", (row["id"],))
+            conn.execute(
+                """DELETE FROM participants WHERE id = ?
+                   AND NOT EXISTS (SELECT 1 FROM sessions WHERE participant_id = ?)""",
+                (row["participant_id"], row["participant_id"]),
+            )
+            conn.commit()
+            record_path = row["record_path"]
+    _delete_record_files([record_path])
+    return True
+
+
+def delete_participant_history(participant_name: str) -> int:
+    """Delete a participant and every saved session, trial, and biosignal."""
+    if not participant_name or participant_name == UNASSIGNED_PARTICIPANT:
+        return 0
+    with _lock:
+        with _connect() as conn:
+            participant = conn.execute(
+                "SELECT id FROM participants WHERE participant_name = ? COLLATE NOCASE",
+                (participant_name,),
+            ).fetchone()
+            if participant is None:
+                return 0
+            rows = conn.execute(
+                "SELECT record_path FROM sessions WHERE participant_id = ?",
+                (participant["id"],),
+            ).fetchall()
+            conn.execute("DELETE FROM participants WHERE id = ?", (participant["id"],))
+            conn.commit()
+    _delete_record_files([row["record_path"] for row in rows])
+    return len(rows)
+
+
+def _delete_record_files(paths: list[str]) -> None:
+    """Remove persisted session records after the database transaction commits."""
+    for record_path in paths:
+        if not record_path or not os.path.isfile(record_path):
+            continue
+        try:
+            os.remove(record_path)
+            folder = os.path.dirname(record_path)
+            if os.path.isdir(folder) and not os.listdir(folder):
+                os.rmdir(folder)
+        except OSError as exc:
+            print(f"[database] Warning: could not delete {record_path}: {exc}")
+
+
 def get_sessions_for_participant(
     participant_name: str,
     drill_key: Optional[str] = None,
@@ -451,7 +534,7 @@ def get_sessions_for_participant(
 ) -> list[dict]:
     """
     Retrieve sessions for a participant, optionally filtered by drill_key.
-    Returns list of dicts sorted by date ascending.
+    Returns list of dicts sorted by save time ascending.
     Used by the Performance Review tab (phase 2).
     """
     with _lock:
@@ -469,7 +552,7 @@ def get_sessions_for_participant(
             if drill_key:
                 sql += " AND s.drill_key = ?"
                 params.append(drill_key)
-            sql += " ORDER BY s.date ASC, s.started_at ASC"
+            sql += " ORDER BY s.saved_at ASC, s.id ASC"
             if limit:
                 sql += f" LIMIT {int(limit)}"
 

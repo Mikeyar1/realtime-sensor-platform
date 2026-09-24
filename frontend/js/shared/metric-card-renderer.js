@@ -1,10 +1,8 @@
 /**
  * metric-card-renderer.js — Shared utility for rendering and updating metric cards.
  *
- * Reads from LabReview.DrillMetrics (drill_metrics.js) to build a consistent
- * card grid for any drill type. Handles two visual sections:
- *   1. Behavioral metrics  — drill-specific, updates from trial-update events
- *   2. Physiological data  — shared across all drills, updates from biosignal-update events
+ * Reads from LabReview.DrillMetrics (drill_metrics.js) for shared
+ * physiological cards. Behavioral cards are rendered by AAR.Standardized.
  *
  * Usage:
  *   MetricCardRenderer.renderCards(behavioralEl, physioEl, drillKey)
@@ -43,7 +41,7 @@ LabReview.MetricCardRenderer = (function () {
       return;
     }
 
-    const behavioralDefs = registry[drillKey] || registry['general'] || [];
+    const behavioralDefs = registry[drillKey] || [];
     const physioDefs     = registry.physiological || [];
 
     // Build behavioral section

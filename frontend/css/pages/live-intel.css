@@ -441,9 +441,23 @@
 .metric-card--md { }
 .metric-card--sm { }
 
-/* Physiological cards — teal left border accent */
+/* Match the shared drill cards in width, height, padding, and surface. */
+.li-metric-grid--physio {
+  grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+}
+
+@media (max-width: 700px) {
+  .li-metric-grid--physio { grid-template-columns: 1fr; }
+}
+
 .metric-card--physio {
-  border-left: 3px solid var(--accent-teal);
+  min-height: 100px;
+  padding: var(--space-lg);
+  justify-content: space-between;
+  gap: 4px;
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
 }
 
 /* Frozen state (RESULTS — no more updates) */
@@ -556,6 +570,19 @@
   align-items: center;
   gap: var(--space-lg);
   padding: var(--space-lg) var(--space-2xl);
+}
+
+.save-panel-inner--no-results {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: var(--space-lg) var(--space-2xl);
+}
+
+.save-panel-no-results-text {
+  flex: 1;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
 }
 
 .save-panel-check {

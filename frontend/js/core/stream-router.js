@@ -157,8 +157,8 @@ LabReview.StreamRouter = (function () {
         break;
 
       // ── PVT real-time trial update → unified trial-update event ─────────────────
-      // Both PVT and GNG drills now use session.trial_update.
-      // payload.task_type ("PVT" | "GNG") identifies the drill if needed.
+      // All three supported drills use session.trial_update.
+      // payload.task_type identifies PVT, GNG, or DISCRIMINATION.
       case 'session.trial_update':
         LabReview.EventBus.emit('trial-update', msg);
         break;
@@ -183,9 +183,18 @@ LabReview.StreamRouter = (function () {
         LabReview.EventBus.emit('db-session-discarded', msg);
         break;
 
-      // ── Database: participant name updated ───────────────────────────────────
+      // -- Database: participant name updated -------------------------------------------
       case 'db.participant_updated':
         LabReview.EventBus.emit('db-participant-updated', msg);
+        break;
+
+      // -- Performance Review: session history result -----------------------------------
+      case 'perf.result':
+        LabReview.EventBus.emit('perf-result', msg);
+        break;
+
+      case 'perf.delete_result':
+        LabReview.EventBus.emit('perf-delete-result', msg);
         break;
 
       default:
@@ -286,7 +295,9 @@ LabReview.StreamRouter = (function () {
   function _send(obj) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(obj));
+      return true;
     }
+    return false;
   }
 
   function _setConnectionUI(connected) {
@@ -310,7 +321,7 @@ LabReview.StreamRouter = (function () {
 
   // ── Generic raw send (for page controllers) ──────────────────────────────────
 
-  function sendRaw(obj) { _send(obj); }
+  function sendRaw(obj) { return _send(obj); }
 
   /** Returns the Set of currently-subscribed stream IDs. */
   function getSubscribed() { return subscribed; }

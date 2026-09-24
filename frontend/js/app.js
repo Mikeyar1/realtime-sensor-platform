@@ -82,8 +82,9 @@ function init() {
   LabReview.Timeline.init();
   LabReview.EventTicker.init();
 
-  // 3. Page controller
-  if (LabReview.LiveIntelPage) LabReview.LiveIntelPage.init();
+  // 3. Page controllers
+  if (LabReview.LiveIntelPage)  LabReview.LiveIntelPage.init();
+  if (LabReview.PerfReviewPage) LabReview.PerfReviewPage.init();
 
   // 4. Sidebar — switches to default page (live-intel)
   LabReview.Sidebar.init();

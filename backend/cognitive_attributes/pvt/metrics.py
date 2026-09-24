@@ -14,8 +14,9 @@ RT POOL
     RT statistics use genuine responses = hits + misses. Omissions are excluded.
 
 DURATION
-    duration_s is the true scenario duration (Scenario Start → Scenario Stop),
-    taken from the session record — NOT derived from trial timestamps.
+    duration_s spans first valid trial activation through final trial closure.
+    The tracker supplies it in the session record and completed trial timestamps
+    provide the same running value during live updates.
 """
 
 from __future__ import annotations
@@ -51,6 +52,10 @@ def _rt_slope(trial_numbers: list[float], rts: list[float]):
 def compute_metrics(trials: list[dict], lapse_multiplier: float = DEFAULT_LAPSE_MULTIPLIER,
                     duration_s: float | None = None) -> dict:
     """Core PVT metric computation shared by live updates and the final summary."""
+    if duration_s is None and trials and all(t.get("completed_at") is not None for t in trials):
+        first = min(t.get("first_activated_at") or t["activated_at"] for t in trials)
+        last = max(t["completed_at"] for t in trials)
+        duration_s = round(last - first, 2)
     total_trials   = len(trials)
     hit_trials     = [t for t in trials if t.get("result") == "hit"]
     miss_trials    = [t for t in trials if t.get("result") == "miss"]
@@ -87,6 +92,7 @@ def compute_metrics(trials: list[dict], lapse_multiplier: float = DEFAULT_LAPSE_
     response_rate = round(n_resp / total_trials * 100, 1) if total_trials else None
     omission_rate = round(n_omit / total_trials * 100, 1) if total_trials else None
     accuracy      = round(n_hits / n_resp * 100, 1) if n_resp else None
+    hits_pct      = round(n_hits / total_trials * 100, 1) if total_trials else None
 
     # Mean Radial Error (marksmanship precision) — averaged over hits with a recorded impact point.
     radial_errors = [t["radial_error_cm"] for t in hit_trials if t.get("radial_error_cm") is not None]
@@ -115,9 +121,11 @@ def compute_metrics(trials: list[dict], lapse_multiplier: float = DEFAULT_LAPSE_
         # Session context
         "total_trials":              total_trials,
         "duration_s":                duration_s,
+        "duration_basis":           "first_to_last_trial",
 
         # Counts
         "hits":                      n_hits,
+        "hits_pct":                  hits_pct,
         "misses":                    n_miss,
         "omissions":                 n_omit,
 
@@ -160,9 +168,8 @@ def compute_live_metrics(trials: list[dict], session_record: dict | None = None)
     """
     Entry point registered in ATTRIBUTE_REGISTRY.
 
-    Pulls the true scenario duration and lapse threshold from the session record
-    (assembled by PvtTracker.get_session_record) so duration reflects Scenario
-    Start → Scenario Stop rather than first-stimulus → last-response.
+    Pulls the first-to-last-trial duration and lapse threshold from the session
+    record assembled by PvtTracker.get_session_record.
     """
     record = session_record or {}
     lapse_multiplier = record.get("lapse_multiplier", DEFAULT_LAPSE_MULTIPLIER)

@@ -27,6 +27,12 @@ LabReview.Sidebar = (function () {
     // Bind nav item clicks
     document.querySelectorAll('.nav-item[data-page]').forEach(item => {
       item.addEventListener('click', () => switchPage(item.dataset.page));
+      item.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          switchPage(item.dataset.page);
+        }
+      });
     });
 
     // Activate default page
@@ -43,6 +49,8 @@ LabReview.Sidebar = (function () {
     // ── Nav highlight ──────────────────────────────────────────
     document.querySelectorAll('.nav-item[data-page]').forEach(el => {
       el.classList.toggle('active', el.dataset.page === page);
+      if (el.dataset.page === page) el.setAttribute('aria-current', 'page');
+      else el.removeAttribute('aria-current');
     });
 
     // ── Page containers ────────────────────────────────────────

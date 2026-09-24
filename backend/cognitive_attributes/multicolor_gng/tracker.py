@@ -14,13 +14,11 @@ TRIAL LIFECYCLE
     Shot Hit           -> closes the trial the shot's target belongs to
                           (hit = go engaged, false_alarm = no_go engaged)
     Target Timed Out   -> closes an unengaged trial
-                          (miss = go withheld, correct_rejection = no_go withheld)
-    Shot Missed        -> background/wild shot — does not close any trial
+                          (omission = go withheld, correct_rejection = no_go withheld)
+    Shot Missed        -> closes an identified target trial; otherwise a wild shot
 
-Both closing events already carry the scenario script's own classification
-(gng_classification / classification fields) — this tracker trusts that
-directly rather than re-deriving it from raw geometry/timing, which is
-exactly the signal the native stream doesn't provide.
+Target Appeared supplies the required response for each trial. No-Go shots
+are commission errors even when they miss, if the stream identifies the target.
 
 Scenario/round lifecycle bookkeeping (Scenario Started/Stopped, Round
 Started/Completed/Reset) is inherited from CustomLslSessionBase — this class
@@ -28,15 +26,16 @@ only implements on_drill_event() for trial-level logic.
 """
 
 import asyncio
-import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from virtra_custom_lsl.session import CustomLslSessionBase
 from virtra_custom_lsl.event_decoder import CustomLslEvent
+from .metrics import compute_metrics
 
 HIT               = "hit"
 MISS              = "miss"
+OMISSION          = "omission"
 FALSE_ALARM       = "false_alarm"
 CORRECT_REJECTION = "correct_rejection"
 
@@ -50,6 +49,9 @@ class _GngTrialState:
     target_type:  str          # "go" | "no_go"
     round_number: int
     activated_at: float        # scenario-time seconds at Target Appeared
+    pending_shot_id: str = ""
+    pending_shot_at: Optional[float] = None
+    ambiguous_shot_ids: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -64,6 +66,7 @@ class CompletedMulticolorGngTrial:
     rt_ms:        Optional[float]
     activated_at: float
     shot_at:      Optional[float]
+    completed_at: float
 
 
 class MulticolorGngTracker(CustomLslSessionBase):
@@ -107,9 +110,11 @@ class MulticolorGngTracker(CustomLslSessionBase):
         biosignals:    Optional[dict] = None,
         drill_key:     str = "",
     ) -> dict:
-        duration_s = round(stopped_at - started_at, 2) if started_at and stopped_at else None
+        trials = self.get_completed_trials()
+        duration_s = round(max(t["completed_at"] for t in trials) -
+                           min(t["activated_at"] for t in trials), 2) if trials else None
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "task_type":      "GNG",
             "drill_key":      drill_key,
             "scenario_name":  scenario_name,
@@ -119,7 +124,7 @@ class MulticolorGngTracker(CustomLslSessionBase):
             "duration_s":     duration_s,
             "wild_shots":     self._wild_shots,
             "rounds":         len(self.round_history),
-            "trials":         self.get_completed_trials(),
+            "trials":         trials,
             "biosignals":     biosignals or {},
         }
 
@@ -129,12 +134,63 @@ class MulticolorGngTracker(CustomLslSessionBase):
     def on_drill_event(self, event: CustomLslEvent) -> None:
         if event.event_name == "Target Appeared":
             self._on_target_appeared(event)
+        elif event.event_name == "Shot Fired":
+            self._on_shot_fired(event)
         elif event.event_name == "Shot Hit":
             self._on_shot_hit(event)
         elif event.event_name == "Target Timed Out":
             self._on_target_timed_out(event)
         elif event.event_name == "Shot Missed":
-            self._wild_shots += 1
+            self._on_shot_missed(event)
+
+    def on_scenario_stopped(self, event: CustomLslEvent) -> None:
+        for trial in list(self._active.values()):
+            self._close(trial, self._timeout_result(trial), None,
+                        trial.pending_shot_at, event.scenario_time_s)
+        self._active.clear()
+
+    @staticmethod
+    def _timeout_result(trial: _GngTrialState) -> str:
+        if trial.pending_shot_at is not None:
+            return MISS if trial.target_type == "go" else FALSE_ALARM
+        if trial.ambiguous_shot_ids:
+            return "unresolved"
+        return OMISSION if trial.target_type == "go" else CORRECT_REJECTION
+
+    def _on_shot_fired(self, event: CustomLslEvent):
+        shot = event.data.get("shot", event.data)
+        shot_id = str(shot.get("shot_id") or f"event:{event.scenario_time_s}")
+        fired_at = shot.get("fired_time_since_start_seconds", event.scenario_time_s)
+        target_id = shot.get("entity_id") or shot.get("target_id")
+        trial = self._active.get(target_id) if target_id else None
+        if trial is None and len(self._active) == 1:
+            trial = next(iter(self._active.values()))
+        if trial is not None and not trial.pending_shot_id:
+            trial.pending_shot_id = shot_id
+            trial.pending_shot_at = fired_at
+        elif trial is None:
+            for active in self._active.values():
+                active.ambiguous_shot_ids.add(shot_id)
+
+    def _on_shot_missed(self, event: CustomLslEvent):
+        self._wild_shots += 1
+        shot = event.data.get("shot", event.data)
+        shot_id = str(shot.get("shot_id") or "")
+        target = shot.get("target", {})
+        target_id = shot.get("entity_id") or target.get("target_id") or shot.get("target_id")
+        trial = self._active.get(target_id) if target_id else None
+        if trial is None and shot_id:
+            trial = next((t for t in self._active.values() if t.pending_shot_id == shot_id), None)
+        if trial is None and len(self._active) == 1:
+            only = next(iter(self._active.values()))
+            if only.pending_shot_at is not None:
+                trial = only
+        if trial is None:
+            return
+        self._active.pop(trial.target_id, None)
+        fired_at = trial.pending_shot_at or shot.get("fired_time_since_start_seconds") or event.scenario_time_s
+        result = MISS if trial.target_type == "go" else FALSE_ALARM
+        self._close(trial, result, None, fired_at, event.scenario_time_s)
 
     # Event handlers
 
@@ -157,18 +213,22 @@ class MulticolorGngTracker(CustomLslSessionBase):
 
     def _on_shot_hit(self, event: CustomLslEvent):
         shot   = event.data.get("shot", {})
+        shot_id = str(shot.get("shot_id") or "")
         target = shot.get("target", {})
         target_id = shot.get("entity_id") or target.get("target_id", "")
 
         trial = self._active.pop(target_id, None)
         if trial is None:
             return  # fixation/background hit — not a tracked target
+        if shot_id:
+            for active in self._active.values():
+                active.ambiguous_shot_ids.discard(shot_id)
 
-        result = HIT if shot.get("gng_classification") == "true_positive" else FALSE_ALARM
+        result = HIT if trial.target_type == "go" else FALSE_ALARM
         rt_s   = shot.get("reaction_time_seconds")
         rt_ms  = rt_s * 1000.0 if rt_s is not None else None
 
-        self._close(trial, result, rt_ms, event.scenario_time_s)
+        self._close(trial, result, rt_ms, event.scenario_time_s, event.scenario_time_s)
 
     def _on_target_timed_out(self, event: CustomLslEvent):
         target    = event.data.get("target", {})
@@ -178,10 +238,10 @@ class MulticolorGngTracker(CustomLslSessionBase):
         if trial is None:
             return
 
-        result = MISS if event.data.get("classification") == "false_negative" else CORRECT_REJECTION
-        self._close(trial, result, None, None)
+        result = self._timeout_result(trial)
+        self._close(trial, result, None, trial.pending_shot_at, event.scenario_time_s)
 
-    def _close(self, trial: _GngTrialState, result: str, rt_ms: Optional[float], shot_at: Optional[float]):
+    def _close(self, trial: _GngTrialState, result: str, rt_ms: Optional[float], shot_at: Optional[float], completed_at: float):
         completed = CompletedMulticolorGngTrial(
             trial_number = trial.trial_number,
             target_id    = trial.target_id,
@@ -192,6 +252,7 @@ class MulticolorGngTracker(CustomLslSessionBase):
             rt_ms        = rt_ms,
             activated_at = trial.activated_at,
             shot_at      = shot_at,
+            completed_at = completed_at,
         )
         self._completed.append(completed)
         self._broadcast_update(completed)
@@ -208,36 +269,14 @@ class MulticolorGngTracker(CustomLslSessionBase):
             "rt_ms":        round(t.rt_ms, 2) if t.rt_ms is not None else None,
             "activated_at": t.activated_at,
             "shot_at":      t.shot_at,
+            "completed_at": t.completed_at,
         }
 
     # Running metrics (ms-based — consumed live by the frontend trial_update handler)
 
     def _compute_running_metrics(self) -> dict:
-        total_go   = sum(1 for t in self._completed if t.target_type == "go")
-        total_nogo = sum(1 for t in self._completed if t.target_type == "no_go")
-        hits   = sum(1 for t in self._completed if t.result == HIT)
-        misses = sum(1 for t in self._completed if t.result == MISS)
-        fas    = sum(1 for t in self._completed if t.result == FALSE_ALARM)
-        crs    = sum(1 for t in self._completed if t.result == CORRECT_REJECTION)
-        rts    = [t.rt_ms for t in self._completed if t.rt_ms is not None]
-
-        return {
-            "total_go":           total_go,
-            "total_no_go":        total_nogo,
-            "hits":               hits,
-            "misses":             misses,
-            "false_alarms":       fas,
-            "correct_rejections": crs,
-            "hit_rate_pct":       round(hits   / total_go   * 100, 1) if total_go   else None,
-            "miss_rate_pct":      round(misses / total_go   * 100, 1) if total_go   else None,
-            "fa_rate_pct":        round(fas    / total_nogo * 100, 1) if total_nogo else None,
-            "cr_rate_pct":        round(crs    / total_nogo * 100, 1) if total_nogo else None,
-            "mean_rt_ms":         round(statistics.mean(rts),   1) if rts else None,
-            "median_rt_ms":       round(statistics.median(rts), 1) if rts else None,
-            "sd_rt_ms":           round(statistics.stdev(rts),  1) if len(rts) >= 2 else None,
-            "wild_shots":         self._wild_shots,
-            "round":              self.current_round,
-        }
+        return {**compute_metrics(self.get_completed_trials(), self._wild_shots),
+                "round": self.current_round}
 
     # Broadcast
 

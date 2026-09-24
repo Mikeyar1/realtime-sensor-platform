@@ -5,22 +5,14 @@
  *
  * Responsibilities:
  *   1. Receive the session.scenario_started payload (contains task_type)
- *   2. Activate the correct task-type display module (GNG, PVT, General)
+ *   2. Activate one of the three supported task displays
  *   3. Forward all events and metric results to the active module
  *
  * Task-type to module mapping (driven by Config/drill_registry.toml):
- *   GNG          → LabReview.AAR.GNG
- *   PVT          → LabReview.AAR.PVT
- *   DISCRIMINATION → LabReview.AAR.Discrimination
- *   GENERAL      → LabReview.AAR.General  (fallback)
- *   MARKSMANSHIP → LabReview.AAR.General  (until marksmanship module is built)
+ *   GNG / PVT / DISCRIMINATION → LabReview.AAR.Standardized
  *
- * Adding a new task type:
- *   1. Add task_type = "MYTYPE" to Config/drill_registry.toml
- *   2. Create features/aar/task-types/mytype.js exporting LabReview.AAR.MYTYPE
- *   3. Add the mapping below under TASK_TYPE_MODULES
- *   4. Load the script in index.html
- *   Done — no other code changes needed.
+ * New task types require an explicit registry entry, metric contract, and
+ * display specification. Unknown task types never fall back to another drill.
  */
 
 window.LabReview = window.LabReview || {};
@@ -32,11 +24,9 @@ LabReview.AAR.Dashboard = (function () {
   // Keys must match the task_type values in drill_registry.toml (uppercase).
   // Values are resolved lazily at runtime so modules can load in any order.
   const TASK_TYPE_MODULES = {
-    'GNG':            () => LabReview.AAR.GNG,
-    'PVT':            () => LabReview.AAR.PVT,
-    'DISCRIMINATION': () => LabReview.AAR.Discrimination,
-    'GENERAL':        () => LabReview.AAR.General,
-    'MARKSMANSHIP':   () => LabReview.AAR.General,   // placeholder until marksmanship module
+    'GNG':            () => LabReview.AAR.Standardized.create('GNG'),
+    'PVT':            () => LabReview.AAR.Standardized.create('PVT'),
+    'DISCRIMINATION': () => LabReview.AAR.Standardized.create('DISCRIMINATION'),
   };
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -47,8 +37,7 @@ LabReview.AAR.Dashboard = (function () {
 
   function mount(containerEl) {
     _container = containerEl;
-    // Show the General waiting state until a scenario starts
-    _activateModule('GENERAL', {});
+    _renderWaiting();
   }
 
   function unmount() {
@@ -58,8 +47,9 @@ LabReview.AAR.Dashboard = (function () {
   }
 
   function reset() {
-    if (_activeModule && _activeModule.reset) _activeModule.reset();
-    else _activateModule('GENERAL', {});
+    if (_activeModule && _activeModule.unmount) _activeModule.unmount();
+    _activeModule = null;
+    _renderWaiting();
   }
 
   // ── Event forwarding ────────────────────────────────────────────────────────
@@ -69,7 +59,7 @@ LabReview.AAR.Dashboard = (function () {
    * payload.task_type determines which AAR module to activate.
    */
   function onScenarioStarted(payload) {
-    const taskType = (payload.task_type || 'GENERAL').toUpperCase();
+    const taskType = (payload.task_type || '').toUpperCase();
     _activateModule(taskType, payload);
     if (_activeModule && _activeModule.onScenarioStarted) {
       _activeModule.onScenarioStarted(payload);
@@ -146,19 +136,21 @@ LabReview.AAR.Dashboard = (function () {
   function _activateModule(taskType, payload) {
     if (_activeModule && _activeModule.unmount) _activeModule.unmount();
 
-    const resolver = TASK_TYPE_MODULES[taskType] || TASK_TYPE_MODULES['GENERAL'];
-    const module   = resolver ? resolver() : null;
-
-    if (!module) {
-      console.warn(`[AAR] No display module found for task_type="${taskType}" — falling back to General`);
-      _activeModule = (TASK_TYPE_MODULES['GENERAL'])();
-    } else {
-      _activeModule = module;
+    const resolver = TASK_TYPE_MODULES[taskType];
+    _activeModule = resolver ? resolver() : null;
+    if (!_activeModule) {
+      console.warn(`[AAR] Unsupported task_type="${taskType}"`);
+      _renderWaiting('Unsupported drill type');
+      return;
     }
 
     if (_container && _activeModule && _activeModule.mount) {
       _activeModule.mount(_container);
     }
+  }
+
+  function _renderWaiting(label = 'Waiting for a supported drill') {
+    if (_container) _container.innerHTML = `<div class="aar-waiting"><div class="aar-waiting-label">${label}</div><div class="aar-waiting-sub">PVT, Go/No-Go, or Behavioral Discrimination</div></div>`;
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────

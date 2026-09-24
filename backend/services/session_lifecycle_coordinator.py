@@ -5,13 +5,13 @@ Routes incoming WebSocket commands to VirTraScenarioOrchestrator.
 Owns the high-level live session state: IDLE ↔ LISTENING ↔ LIVE.
 
 Session persistence flow (auto-save, no save button):
-  1. Scenario stops → analysis_service_client auto-saves to DB + disk.
+  1. VirTra stop event or session.stop → analysis_service_client auto-saves to DB.
   2. Frontend receives session.metrics_ready with session_uuid + participant_name.
   3. Frontend shows Confirm / Discard panel with a participant name dropdown.
   4. Operator confirms (optionally correcting the name) → db.confirm_session
      → updates participant name in DB if changed, broadcasts db.session_saved.
   5. Operator discards → db.discard_session
-     → deletes DB row + JSON file, broadcasts db.session_discarded.
+     → deletes the DB row, broadcasts db.session_discarded.
   6. Operator clicks New Session → resets to IDLE.
 """
 
@@ -29,6 +29,8 @@ from api.message_types import (
     MSG_DB_DISCARD_SESSION, MSG_DB_UPDATE_PARTICIPANT,
     MSG_DB_PARTICIPANTS_LIST, MSG_DB_SESSION_SAVED,
     MSG_DB_SESSION_DISCARDED, MSG_DB_PARTICIPANT_UPDATED,
+    MSG_PERF_QUERY, MSG_PERF_RESULT, MSG_PERF_DELETE_SESSION,
+    MSG_PERF_DELETE_PARTICIPANT, MSG_PERF_DELETE_RESULT,
 )
 from .virtra_scenario_orchestrator import VirTraScenarioOrchestrator
 from .session_data_writer import write_session_record
@@ -69,6 +71,28 @@ def _db_discard(session_uuid: str) -> bool:
     except Exception as e:
         print(f"[SessionLifecycleCoordinator] DB discard error: {e}")
         return False
+
+
+def _db_get_sessions(participant_name: str, drill_key: str | None, limit: int | None) -> list:
+    """Thread-safe DB call — query session history for a participant."""
+    try:
+        from services.database import get_sessions_for_participant  # type: ignore
+        return get_sessions_for_participant(
+            participant_name, drill_key=drill_key or None, limit=limit
+        )
+    except Exception as e:
+        print(f"[SessionLifecycleCoordinator] DB get_sessions error: {e}")
+        return []
+
+
+def _db_delete_history_session(session_uuid: str, participant_name: str) -> bool:
+    from services.database import delete_history_session  # type: ignore
+    return delete_history_session(session_uuid, participant_name)
+
+
+def _db_delete_participant_history(participant_name: str) -> int:
+    from services.database import delete_participant_history  # type: ignore
+    return delete_participant_history(participant_name)
 
 
 class SessionLifecycleCoordinator:
@@ -121,6 +145,14 @@ class SessionLifecycleCoordinator:
         elif msg_type == "live.deactivate":
             await self._orchestrator.handle_live_deactivate(websocket)
 
+        elif msg_type == "session.stop":
+            if self._orchestrator.stop_active_drill():
+                await self._orchestrator.handle_live_deactivate(websocket)
+            else:
+                await self._send(websocket, self._error(
+                    "no_active_drill", "There is no active drill to stop", "session.stop"
+                ))
+
         # Legacy save_record — kept for backwards compat; forwards to confirm flow
         elif msg_type == MSG_SESSION_SAVE_RECORD:
             await self._handle_legacy_save_record(websocket, msg)
@@ -152,6 +184,12 @@ class SessionLifecycleCoordinator:
 
         elif msg_type == MSG_DB_UPDATE_PARTICIPANT:
             await self._handle_db_update_participant(websocket, msg)
+
+        elif msg_type == MSG_PERF_QUERY:
+            await self._handle_perf_query(websocket, msg)
+
+        elif msg_type in (MSG_PERF_DELETE_SESSION, MSG_PERF_DELETE_PARTICIPANT):
+            await self._handle_perf_delete(websocket, msg)
 
         else:
             print(f"[SessionLifecycleCoordinator] Unknown message type: {msg_type!r} — ignoring")
@@ -231,6 +269,66 @@ class SessionLifecycleCoordinator:
             "new_name":     new_name,
             "success":      success,
             "detail":       detail,
+        })
+
+    async def _handle_perf_query(self, websocket, msg: dict):
+        """
+        Return session history for a participant.
+        Request:  {participant_name, drill_key?, limit?}
+        Response: {type: perf.result, participant_name, drill_key, sessions: [...]}
+        Each session dict has: id, session_uuid, drill_key, task_type, scenario_name,
+        date, started_at, stopped_at, duration_s, metrics, biosignals, notes, saved_at.
+        """
+        participant_name = str(msg.get("participant_name", "")).strip()
+        drill_key        = str(msg.get("drill_key", "")).strip() or None
+        limit_raw        = msg.get("limit")
+        limit            = int(limit_raw) if limit_raw else None
+
+        sessions = await self._loop.run_in_executor(
+            None, _db_get_sessions, participant_name, drill_key, limit
+        )
+        await self._send(websocket, {
+            "type":             MSG_PERF_RESULT,
+            "participant_name": participant_name,
+            "drill_key":        drill_key or "",
+            "sessions":         sessions,
+        })
+
+    async def _handle_perf_delete(self, websocket, msg: dict):
+        """Delete confirmed history rows and return a scoped result to the caller."""
+        operation = msg["type"]
+        participant_name = str(msg.get("participant_name", "")).strip()
+        session_uuid = str(msg.get("session_uuid", "")).strip()
+        deleted_count = 0
+        detail = ""
+        try:
+            if not participant_name:
+                detail = "A participant name is required."
+            elif operation == MSG_PERF_DELETE_SESSION:
+                if not session_uuid:
+                    detail = "A session ID is required."
+                else:
+                    deleted_count = int(await self._loop.run_in_executor(
+                        None, _db_delete_history_session, session_uuid, participant_name
+                    ))
+            else:
+                deleted_count = await self._loop.run_in_executor(
+                    None, _db_delete_participant_history, participant_name
+                )
+            if not detail and deleted_count == 0:
+                detail = "No matching saved sessions were found."
+        except Exception as exc:
+            print(f"[SessionLifecycleCoordinator] History deletion error: {exc}")
+            detail = str(exc)
+
+        await self._send(websocket, {
+            "type": MSG_PERF_DELETE_RESULT,
+            "operation": operation,
+            "participant_name": participant_name,
+            "session_uuid": session_uuid,
+            "success": deleted_count > 0,
+            "deleted_count": deleted_count,
+            "detail": detail,
         })
 
     # ── Legacy save_record (backwards-compat shim) ────────────────────────────

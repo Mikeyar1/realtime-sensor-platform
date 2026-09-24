@@ -82,6 +82,8 @@ class CompletedPvtTrial:
     activated_at: float
     shot_at:      Optional[float]
     radial_error_cm: Optional[float] = None  # None for miss/omission (no impact point)
+    first_activated_at: float = 0.0
+    completed_at: float = 0.0
 
 
 def _rt_from(trial: "_PvtTrialState", shot_ts: float) -> float:
@@ -212,6 +214,8 @@ class PvtTracker:
                     "result":       t.result,
                     "shot_id":      t.shot_id,
                     "activated_at": t.activated_at,
+                    "first_activated_at": t.first_activated_at,
+                    "completed_at": t.completed_at,
                     "shot_at":      t.shot_at,
                     "radial_error_cm": t.radial_error_cm,
                 }
@@ -227,9 +231,13 @@ class PvtTracker:
         biosignals:    Optional[dict] = None,
     ) -> dict:
         """Assemble the session record for metric computation and disk storage."""
-        duration_s = round(stopped_at - started_at, 2) if started_at and stopped_at else None
+        self.finalize(stopped_at)
+        trials = self.get_completed_trials()
+        duration_s = round(
+            max(t["completed_at"] for t in trials) - min(t["first_activated_at"] for t in trials), 2
+        ) if trials else None
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "task_type":      "PVT",
             "scenario_name":  scenario_name,
             "session_id":     session_id,
@@ -237,7 +245,7 @@ class PvtTracker:
             "stopped_at":     stopped_at,
             "duration_s":     duration_s,
             "lapse_multiplier": self._lapse_multiplier,
-            "trials":         self.get_completed_trials(),
+            "trials":         trials,
             "biosignals":     biosignals or {},
         }
 
@@ -352,6 +360,8 @@ class PvtTracker:
             activated_at    = trial.activated_at,
             shot_at         = shot_ts,
             radial_error_cm = _parse_local_hit_radial_cm(meta),
+            first_activated_at = trial.first_activated_at,
+            completed_at = ts,
         )
 
         if shot_id:
@@ -388,7 +398,7 @@ class PvtTracker:
 
     # Grace window
 
-    def _resolve_now(self, trial: "_PvtTrialState"):
+    def _resolve_now(self, trial: "_PvtTrialState", stopped_at: float | None = None):
         """
         Synchronously resolve a trial as miss/omission (no hit arrived).
         Shared by the wall-clock grace callback and the event-time staleness
@@ -418,10 +428,20 @@ class PvtTracker:
             shot_id      = shot_id,
             activated_at = trial.activated_at,
             shot_at      = shot_ts,
+            first_activated_at = trial.first_activated_at,
+            completed_at = trial.deactivated_at or stopped_at or shot_ts or trial.activated_at,
         )
 
         self._completed.append(completed)
         self._broadcast_update(completed)
+
+    def finalize(self, stopped_at: float):
+        """Score trials still open when the scenario stops."""
+        with self._lock:
+            pending = list(self._active.values())
+            self._active.clear()
+            for trial in pending:
+                self._resolve_now(trial, stopped_at)
 
     async def _resolve_after_grace(self, target_id: str, trial_number: int):
         """
@@ -453,6 +473,8 @@ class PvtTracker:
                 "result":       t.result,
                 "rt_ms":        t.rt_ms,
                 "activated_at": t.activated_at,
+                "first_activated_at": t.first_activated_at,
+                "completed_at": t.completed_at,
                 "shot_at":      t.shot_at,
                 "radial_error_cm": t.radial_error_cm,
             }

@@ -8,7 +8,17 @@ A real-time human performance monitoring dashboard built for VirTra-based simula
 
 During a training scenario, LabReview connects to hardware streams over [Lab Streaming Layer (LSL)](https://labstreaminglayer.org/) — including physiological sensors (e.g., Polar H10, Pupil Labs Neon eye tracking) and VirTra simulator events, and routes them through a Python backend to a browser-based dashboard. When a VirTra scenario starts, the backend identifies which cognitive assessment is running, instantiates the appropriate trial tracker, and streams live trial-by-trial metrics to the frontend over WebSocket.
 
-After the scenario stops, summary metrics are computed locally and presented in an after-action review (AAR) panel. The operator can then fill in participant info and save a permanent session record to disk.
+When the scenario stops, either from VirTra or the dashboard's Stop button, summary metrics are computed locally and shown in the after-action review (AAR) panel. Sessions with valid trials are auto-saved to the local database; the operator then confirms the participant name or discards the session.
+
+## Supported scored drills
+
+| Drill | Input | Primary construct |
+| --- | --- | --- |
+| PVT | Registered native VirTra scenarios | Sustained attention / vigilance |
+| Go/No-Go | `multicolor_gng` custom VirTra LSL stream | Response inhibition / inhibitory control |
+| Behavioral Discrimination | Registered native VirTra scenarios | Perceptual / decision discrimination |
+
+Unknown scenarios and former Marksmanship scenarios do not start a scored session. Shared VirTra events may still appear in the raw event feed. The live and final cards use the same definitions for each drill; see [the current metric reference](METRICS.md).
 
 ---
 
@@ -69,7 +79,7 @@ Maps VirTra scenario name strings to cognitive attributes. This is the main file
 Each entry specifies:
 - Which tracker to use
 - Which VirTra scenario names trigger it (matched against `Scenario Started` events)
-- Target classification for  drills
+- Target classification for drills
 - Timing parameters (e.g. `late_shot_window_ms`, `min_rt_ms`)
 
 To add a new scenario to an existing drill type, just append its name to the `scenarios` list. To add a new cognitive attribute entirely, see the section below.
@@ -82,8 +92,8 @@ To add a new scenario to an existing drill type, just append its name to the `sc
 2. The backend detects `Scenario Started` from the VirTra LSL stream, looks up the drill in the registry, and begins trial tracking
 3. VirTra events (Target Activated, Shot Hit, Target Deactivated, etc.) arrive and are processed trial-by-trial; each completed trial broadcasts an update to the frontend in real time
 4. Physiological data (HR, HRV, pupil diameter) is monitored in a rolling window and broadcast periodically alongside trial data
-5. When `Scenario Stopped` fires, summary metrics are computed and the AAR panel fills with final results
-6. The operator enters participant info and clicks **Save** — a `session_record.json` is written to `data/SessionData/`
+5. When `Scenario Stopped` fires or the operator clicks **Stop**, the backend finalizes the drill, computes summary metrics, and auto-saves sessions with valid trials to the local database
+6. The operator confirms or corrects the participant name, or discards the session
 
 ---
 
@@ -106,7 +116,7 @@ The backend sends:
 | `streams.catalog` | After catalog request or when streams change |
 | `stream.sample` | Each LSL sample for subscribed streams |
 | `session.scenario_started` | VirTra scenario begins |
-| `session.trial_update` | Each completed PVT or GNG trial |
+| `session.trial_update` | Each completed PVT, Go/No-Go, or Discrimination trial |
 | `session.biosignal_update` | Rolling HR/HRV/pupil stats |
 | `session.virtra_event` | Raw VirTra event for the event log |
 | `session.scenario_stopped` | VirTra scenario ends |
@@ -122,9 +132,9 @@ Message type constants are defined in `backend/api/message_types.py` (Python) an
 2. Create `backend/cognitive_attributes/<name>/metrics.py` — implement `compute_live_metrics(trials) -> dict`
 3. Add an entry to `ATTRIBUTE_REGISTRY` in `backend/cognitive_attributes/__init__.py`
 4. Add a `[cognitive_attributes.<name>]` section to `config/drill_registry.toml` with the scenario name(s) and any parameters
-5. Optionally add a matching AAR display module under `frontend/js/features/aar/task-types/` and register it in `aar-dashboard.js`
+5. Add an explicit task-type mapping and metric-card specification in the frontend AAR files
 
-Steps 1–4 are sufficient for backend trial tracking. Step 5 is only needed if you want a custom frontend display beyond the general fallback.
+The registry and AAR reject unsupported task types. Add a new type only when its tracker, metric contract, and UI are ready together.
 
 ---
 

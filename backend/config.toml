@@ -27,3 +27,10 @@ session_data_directory = "../data/SessionData"
 # The database/ directory will be created automatically at startup if it does not exist.
 path = "../database/labreview.db"
 
+[frontend]
+# Port for the embedded static file server that serves the frontend/ folder.
+# Change this if 3000 is already in use on the target machine.
+port = 3000
+# Automatically open the dashboard in the default browser on startup.
+# Set to false if you prefer to open it manually.
+open_browser = true

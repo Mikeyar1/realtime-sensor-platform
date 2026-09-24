@@ -10,7 +10,7 @@
  *               — Two card sections: Behavioral Metrics | Physiological Data
  *               — VirTra event ticker (in footer)
  *   RESULTS     — Cards freeze, final computed metrics overwrite live values
- *               — Save session record panel appears below
+ *               — Confirm / Discard panel appears after a successful auto-save
  *
  * Metric cards are config-driven via LabReview.DrillMetrics (drill_metrics.js).
  * Rendering is handled by LabReview.MetricCardRenderer (metric-card-renderer.js).
@@ -19,9 +19,9 @@
  *   1. System starts → IDLE state, stream panel shows connected LSL streams
  *   2. VirTra fires "Scenario Started" (or operator clicks ▶ Start) → CAPTURING
  *   3. trial-update / biosignal-update events → metric cards update live
- *   4. VirTra fires "Scenario Stopped" → SUMMARIZING → cards freeze
- *   5. Analysis returns metrics → RESULTS, final values overwrite cards
- *   6. Operator fills Save panel → session_record.json written to Data/SessionData/
+ *   4. VirTra stop event or operator Stop → backend finalizes the drill
+ *   5. Analysis returns metrics and auto-save result → RESULTS
+ *   6. Operator confirms a participant name or discards the session
  *   7. Operator clicks New Session → IDLE reset
  */
 
@@ -70,11 +70,12 @@ LabReview.LiveIntelPage = (function () {
     // Raw VirTra events → AAR dashboard (event counting etc.)
     LabReview.EventBus.on('virtra-event', _onVirtraEvent);
 
-    // Trial updates (PVT, GNG) → metric cards
+    // Trial updates for the three supported drills → metric cards
     LabReview.EventBus.on('trial-update', _onTrialUpdate);
 
     // Post-scenario analysis metrics (auto-saved to DB already)
     LabReview.EventBus.on('metrics-ready', _onMetricsReady);
+    LabReview.EventBus.on('api-error', _onApiError);
 
     // Biosignal updates → physiological cards
     LabReview.EventBus.on('biosignal-update', _onBiosignalUpdate);
@@ -322,11 +323,15 @@ LabReview.LiveIntelPage = (function () {
   }
 
   function _stopCapture() {
-    LabReview.StreamRouter.deactivateLive();
-    _activeDisplay?.onScenarioStopped?.({ manual: true });
-    LabReview.MetricCardRenderer.freezeCards();
-    _setState('RESULTS');
-    _showResultsBanner('Scenario stopped manually — results below.');
+    if (_state !== 'CAPTURING') return;
+    if (!_drillKey) {
+      LabReview.StreamRouter.deactivateLive();
+      _resetToIdle();
+      return;
+    }
+    _setState('SUMMARIZING');
+    _showResultsBanner('Stopping drill — computing final metrics…');
+    LabReview.StreamRouter.send({ type: 'session.stop' });
   }
 
   // ── EventBus handlers ─────────────────────────────────────────────────────
@@ -362,11 +367,16 @@ LabReview.LiveIntelPage = (function () {
   function _onScenarioStarted(payload) {
     console.log(`[LiveIntel] scenario-started — state=${_state}`, payload);
 
+    if (!['PVT', 'GNG', 'DISCRIMINATION'].includes(payload.task_type) || !payload.drill_key) {
+      console.warn('[LiveIntel] Ignoring unsupported drill', payload);
+      return;
+    }
+
     if (_state === 'IDLE') _startCapture();
 
-    _drillKey = payload.drill_key || 'general';
+    _drillKey = payload.drill_key;
     _drillLabel = payload.drill_label || _drillKey;
-    _taskType = payload.task_type || 'GENERAL';
+    _taskType = payload.task_type;
 
     if (_state === 'CAPTURING') {
       _applyStateToPage();
@@ -383,22 +393,32 @@ LabReview.LiveIntelPage = (function () {
 
   function _onScenarioStopped(payload) {
     _activeDisplay?.onScenarioStopped?.(payload);
-    if (_state === 'CAPTURING') {
-      _setState('SUMMARIZING');
+    if (_state === 'CAPTURING' || _state === 'SUMMARIZING') {
+      if (_state === 'CAPTURING') _setState('SUMMARIZING');
       LabReview.MetricCardRenderer.freezeCards();
-      _showResultsBanner('Scenario complete — computing final metrics…');
+      _showResultsBanner(payload.manual
+        ? 'Drill stopped manually — computing final metrics…'
+        : 'Scenario complete — computing final metrics…');
     }
   }
 
   function _onMetricsReady(msg) {
     // Overwrite live card values with the final computed metrics from Analysis
     const metrics = msg.metrics || msg;
-    LabReview.MetricCardRenderer.updateAllCards(metrics, 'trial');
+    if (msg.metrics) LabReview.MetricCardRenderer.updateAllCards(metrics, 'trial');
 
     // Also let the AAR Dashboard render any charts it produces
-    _activeDisplay?.onMetricsReady?.(metrics);
+    if (msg.metrics) _activeDisplay?.onMetricsReady?.(metrics);
 
     _setState('RESULTS');
+    if (msg.error || !msg.auto_saved || !msg.session_uuid) {
+      const detail = msg.error === 'no_trials'
+        ? 'No valid trials were recorded, so this drill was not saved.'
+        : 'Final metrics could not be saved. Check the backend log.';
+      _showResultsBanner(detail);
+      _showNoResultsPanel(detail);
+      return;
+    }
     _showResultsBanner('Scenario complete — auto-saved');
 
     // Store session identity for confirm/discard panel
@@ -410,10 +430,18 @@ LabReview.LiveIntelPage = (function () {
     LabReview.StreamRouter.send({ type: 'db.get_participants' });
   }
 
+  function _onApiError(msg) {
+    if (msg.context !== 'session.stop' || _state !== 'SUMMARIZING') return;
+    LabReview.StreamRouter.deactivateLive();
+    _setState('RESULTS');
+    _showResultsBanner('The drill could not be stopped.');
+    _showNoResultsPanel(msg.message || 'The drill could not be stopped.');
+  }
+
   // ── Trial / biosignal update routing ──────────────────────────────────────
 
   /**
-   * Handles trial-update from both PVT and GNG drills.
+   * Handles trial updates from all supported drills.
    * If it arrives while IDLE (mid-scenario connect), synthesises scenario_started.
    */
   function _onTrialUpdate(msg) {
@@ -461,7 +489,7 @@ LabReview.LiveIntelPage = (function () {
     panel.innerHTML = `
       <div class="save-panel-inner" id="sp-inner">
         <div class="save-panel-header">
-          <h3 class="save-panel-title">✅ Session Auto-Saved</h3>
+          <h3 class="save-panel-title">Session Auto-Saved</h3>
           <p class="save-panel-subtitle">Review and confirm participant details, or discard this session.</p>
         </div>
 
@@ -488,7 +516,6 @@ LabReview.LiveIntelPage = (function () {
           <button class="save-btn-primary" id="sp-confirm-btn">✓ Confirm</button>
           <span class="save-panel-spacer"></span>
           <button class="save-btn-discard" id="sp-discard-btn">🗑 Discard</button>
-          <button class="save-btn-new-session" id="sp-new-session-btn">↓ New Session</button>
         </div>
       </div>
     `;
@@ -498,11 +525,21 @@ LabReview.LiveIntelPage = (function () {
       ?.addEventListener('click', _onConfirmClicked);
     document.getElementById('sp-discard-btn')
       ?.addEventListener('click', _onDiscardClicked);
-    document.getElementById('sp-new-session-btn')
-      ?.addEventListener('click', _resetToIdle);
 
     // Populate datalist if we already have the list
     _populateDatalist(_knownParticipants);
+  }
+
+  function _showNoResultsPanel(message) {
+    const panel = document.getElementById('li-save-panel');
+    if (!panel) return;
+    panel.innerHTML = `<div class="save-panel-inner save-panel-inner--no-results">
+      <span class="save-panel-no-results-text">${_escHtml(message)}</span>
+      <button class="save-btn-new-session" id="sp-new-session-btn-empty">New Session</button>
+    </div>`;
+    panel.style.display = '';
+    document.getElementById('sp-new-session-btn-empty')
+      ?.addEventListener('click', _resetToIdle);
   }
 
   function _onParticipantsList(msg) {
