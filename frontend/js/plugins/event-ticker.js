@@ -41,7 +41,7 @@ LabReview.EventTicker = (function () {
     'Shot Hit': '',
     'Shot Miss': '',
     'Unscored Hit': '',
-    'Scenario Started': '▶',
+    'Scenario Started': '',
     'Stage Changed': '',
     'default': '',
   };

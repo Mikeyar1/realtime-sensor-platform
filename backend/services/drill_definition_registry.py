@@ -13,6 +13,8 @@ import sys
 import tomllib
 from typing import Optional
 
+from .virtra_stream_config import VirtraStreamConfig
+
 # Path to the registry file.
 # When running as a PyInstaller frozen bundle, __file__ is inside _internal/services/
 # and there is no repo root above it — use sys._MEIPASS instead.
@@ -47,6 +49,7 @@ class DrillDefinitionRegistry:
 
     def __init__(self, toml_path: str = _TOML_PATH):
         self._path = toml_path
+        self.stream_config = VirtraStreamConfig()
         self._data: dict = {}
         self._scenario_map: dict[str, dict] = {}   # scenario_name_lower → drill dict
         self._custom_lsl_map: dict[str, dict] = {}  # drill_type_lower → drill dict
@@ -65,6 +68,7 @@ class DrillDefinitionRegistry:
 
         # Build scenario → cognitive attribute lookup
         attributes: dict = self._data.get("cognitive_attributes", {})
+        attribute_meta: dict[str, dict] = {}
         for drill_key, attr_cfg in attributes.items():
             task_type = attr_cfg.get("task_type")
             if task_type not in {"PVT", "GNG", "DISCRIMINATION"}:
@@ -85,10 +89,36 @@ class DrillDefinitionRegistry:
                 "scenario_params":   attr_cfg.get("scenario_params", {}),
             }
 
+            attribute_meta[drill_key] = drill_meta
+
             for scenario_name in attr_cfg.get("scenarios", []):
                 self._scenario_map[scenario_name.lower().strip()] = {
                     **drill_meta,
                     "scenario_name": scenario_name,
+                }
+
+        # Listed native aliases use the stream config; unlisted legacy aliases
+        # remain compatible until their migration is complete.
+        for stream_drill in self.stream_config.drills.values():
+            for alias in stream_drill["native_scenarios"]:
+                alias_key = alias.lower().strip()
+                if stream_drill["metrics_source"] != "native":
+                    self._scenario_map.pop(alias_key, None)
+                    continue
+                drill_key = stream_drill.get("native_result_key", stream_drill["canonical_key"])
+                native_meta = attribute_meta.get(drill_key)
+                if native_meta is None:
+                    raise ValueError(f"No native tracker configuration for drill {drill_key!r}")
+                from cognitive_attributes import ATTRIBUTE_REGISTRY
+                native_task = stream_drill.get("native_adapter", native_meta["task_type"])
+                if native_task not in ATTRIBUTE_REGISTRY:
+                    raise ValueError(f"No native scorer for task_type {native_task!r}")
+                self._scenario_map[alias_key] = {
+                    **native_meta,
+                    "scenario_name": alias,
+                    "task_type": native_task,
+                    "metrics_source": "native",
+                    "stream_policy": stream_drill,
                 }
 
         # Custom, script-driven VirTra LSL drills — resolved by the stream's
@@ -109,10 +139,41 @@ class DrillDefinitionRegistry:
                 "custom_lsl_type": drill_type,
             }
 
+        # The dedicated stream config is authoritative for listed custom
+        # drill_type aliases. Disabled templates cannot accidentally activate a
+        # scorer even if a legacy registry entry for that alias remains.
+        for stream_drill in self.stream_config.drills.values():
+            for alias in stream_drill["custom_drill_types"]:
+                alias_key = alias.lower().strip()
+                if stream_drill["metrics_source"] != "custom":
+                    self._custom_lsl_map.pop(alias_key, None)
+                    continue
+                task_type = stream_drill["task_type"]
+                if task_type not in {"PVT", "GNG", "DISCRIMINATION", "PVT_FITTS", "COMPOSITE"}:
+                    raise ValueError(
+                        f"No implemented tracker for configured custom task_type {task_type!r}"
+                    )
+                from cognitive_attributes import ATTRIBUTE_REGISTRY
+                from cognitive_attributes.composite_custom import CompositeCustomTracker
+                tracker, _ = ATTRIBUTE_REGISTRY.get(task_type, (None, None))
+                if tracker is None or tracker is CompositeCustomTracker:
+                    raise ValueError(f"Custom scorer for {task_type!r} is not implemented")
+                previous = self._custom_lsl_map.get(alias_key, {})
+                self._custom_lsl_map[alias_key] = {
+                    **previous,
+                    "drill_key": stream_drill.get("custom_result_key", stream_drill["canonical_key"]),
+                    "label": stream_drill["label"],
+                    "task_type": task_type,
+                    "metric_module": stream_drill.get("metric_module", ""),
+                    "custom_lsl_type": alias,
+                    "metrics_source": "custom",
+                    "stream_policy": stream_drill,
+                }
+
         mapped = len(self._scenario_map)
         print(
             f"[DrillDefinitionRegistry] Loaded {len(attributes)} cognitive attribute "
-            f"categories, {mapped} scenario mappings, {len(custom_drills)} custom LSL mappings | {self._path}"
+            f"categories, {mapped} scenario mappings, {len(self._custom_lsl_map)} custom LSL mappings | {self._path}"
         )
 
     def resolve_drill(self, scenario_name: str) -> Optional[dict]:
@@ -130,7 +191,7 @@ class DrillDefinitionRegistry:
         if result is None:
             print(
                 f"[DrillDefinitionRegistry] Unrecognized scenario: {scenario_name!r} "
-                f"— ignoring (not registered in drill_registry.toml)"
+                f"— ignoring (not registered or disabled in drill/stream configuration)"
             )
             return None
 
@@ -151,7 +212,7 @@ class DrillDefinitionRegistry:
         if result is None:
             print(
                 f"[DrillDefinitionRegistry] Unrecognized custom LSL drill_type: {drill_type!r} "
-                f"— ignoring (not registered in drill_registry.toml)"
+                f"— ignoring (not registered or disabled in drill/stream configuration)"
             )
             return None
         return dict(result)
@@ -168,7 +229,7 @@ class DrillDefinitionRegistry:
     def get_all_drill_keys(self) -> list[str]:
         """Return all three registered scored drill keys, including custom LSL."""
         keys = list(self._data.get("cognitive_attributes", {}).keys())
-        for custom in self._data.get("custom_lsl_drills", {}).values():
+        for custom in self._custom_lsl_map.values():
             key = custom.get("drill_key")
             if key and key not in keys:
                 keys.append(key)
@@ -179,7 +240,7 @@ class DrillDefinitionRegistry:
         attrs = self._data.get("cognitive_attributes", {})
         cfg   = attrs.get(drill_key)
         if cfg is None:
-            for custom in self._data.get("custom_lsl_drills", {}).values():
+            for custom in self._custom_lsl_map.values():
                 if custom.get("drill_key") == drill_key:
                     return {"drill_key": drill_key, **custom}
             return None
@@ -196,6 +257,7 @@ class DrillDefinitionRegistry:
 
     def reload(self):
         """Hot-reload the TOML file without restarting."""
+        self.stream_config.reload()
         self._scenario_map.clear()
         self._custom_lsl_map.clear()
         self._load()

@@ -26,6 +26,7 @@ Schema:
 """
 
 import datetime
+from contextlib import contextmanager
 import json
 import os
 import sqlite3
@@ -93,6 +94,24 @@ CREATE TABLE IF NOT EXISTS trials (
 CREATE INDEX IF NOT EXISTS idx_trials_session
     ON trials(session_id);
 
+CREATE TABLE IF NOT EXISTS rounds (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id       INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    round_number     INTEGER NOT NULL,
+    attempt          INTEGER NOT NULL,
+    participant_id   TEXT REFERENCES participants(id),
+    preset_label     TEXT NOT NULL DEFAULT '',
+    preset_mixed     INTEGER NOT NULL DEFAULT 0,
+    ended_reason     TEXT NOT NULL DEFAULT '',
+    started_at       REAL,
+    ended_at         REAL,
+    metrics_json     TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(session_id, round_number, attempt)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rounds_participant_preset
+    ON rounds(participant_id, preset_label);
+
 CREATE TABLE IF NOT EXISTS biosignals (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id       INTEGER NOT NULL
@@ -112,15 +131,20 @@ UNASSIGNED_PARTICIPANT = "__unassigned__"
 
 # ── Connection helper ─────────────────────────────────────────────────────────
 
-def _connect() -> sqlite3.Connection:
-    """Return a new connection with WAL mode and FK enforcement."""
+@contextmanager
+def _connect():
+    """Yield a connection with WAL mode and FK enforcement, then close it."""
     if not _db_path:
         raise RuntimeError("[database] init_db() has not been called")
     conn = sqlite3.connect(_db_path, check_same_thread=False)
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
@@ -130,11 +154,14 @@ def init_db(db_path: str) -> None:
     Must be called once at application startup before any other DB function.
     """
     global _db_path
+    from . import round_repository
     _db_path = db_path
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     with _lock:
         with _connect() as conn:
             conn.executescript(_DDL)
+            _migrate_round_columns(conn)
+            round_repository.install(conn)
             conn.execute(
                 """DELETE FROM participants
                    WHERE (participant_name LIKE 'unknown_participant_%'
@@ -145,7 +172,30 @@ def init_db(db_path: str) -> None:
                 (UNASSIGNED_PARTICIPANT,),
             )
             conn.commit()
+    round_repository.recover_interrupted_runs()
     print(f"[database] Initialized: {db_path}")
+
+
+def _migrate_round_columns(conn: sqlite3.Connection) -> None:
+    additions = {
+        "sessions": {
+            "source": "TEXT NOT NULL DEFAULT 'native'",
+            "capture_status": "TEXT NOT NULL DEFAULT 'complete'",
+            "external_scenario_id": "TEXT NOT NULL DEFAULT ''",
+            "rounds_json": "TEXT NOT NULL DEFAULT '[]'",
+            "native_context_json": "TEXT NOT NULL DEFAULT '{}'",
+            "custom_scenario_name": "TEXT NOT NULL DEFAULT ''",
+        },
+        "trials": {
+            "round_attempt": "INTEGER NOT NULL DEFAULT 1",
+            "component": "TEXT NOT NULL DEFAULT ''",
+        },
+    }
+    for table, columns in additions.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
 
 def get_all_participant_names() -> list[str]:
@@ -155,7 +205,10 @@ def get_all_participant_names() -> list[str]:
             rows = conn.execute(
                 """SELECT participant_name FROM participants p
                    WHERE participant_name <> ?
-                   AND EXISTS (SELECT 1 FROM sessions s WHERE s.participant_id = p.id)
+                   AND (EXISTS (SELECT 1 FROM sessions s WHERE s.participant_id = p.id)
+                     OR EXISTS (SELECT 1 FROM rounds r WHERE r.participant_id = p.id)
+                     OR EXISTS (SELECT 1 FROM assessment_rounds ar
+                                WHERE ar.participant_id = p.id AND ar.save_status = 'saved'))
                    ORDER BY participant_name COLLATE NOCASE""",
                 (UNASSIGNED_PARTICIPANT,),
             ).fetchall()
@@ -256,8 +309,10 @@ def insert_session(
                         (session_uuid, participant_id, drill_key, task_type,
                          scenario_name, date, started_at, stopped_at, duration_s,
                          active_streams, notes, metrics_json, biosignals_json,
-                         record_path, saved_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         record_path, saved_at, source, external_scenario_id,
+                         rounds_json, capture_status, native_context_json,
+                         custom_scenario_name)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_metadata.get("session_id", ""),
@@ -275,21 +330,45 @@ def insert_session(
                         json.dumps(biosignals_dict),
                         record_path,
                         now,
+                        session_metadata.get("source", "native"),
+                        session_metadata.get("external_scenario_id", ""),
+                        json.dumps(session_metadata.get("rounds", [])),
+                        session_metadata.get("capture_status", "complete"),
+                        json.dumps(session_metadata.get("native_context", {})),
+                        session_metadata.get("custom_scenario_name", ""),
                     ),
                 )
                 session_id = cur.lastrowid
-                if session_id == 0:
-                    # session_uuid already existed — IGNORE'd, fetch existing id
+                if cur.rowcount == 0:
+                    # A repeated stop must not append duplicate child rows.
                     row = conn.execute(
                         "SELECT id FROM sessions WHERE session_uuid = ?",
                         (session_metadata.get("session_id", ""),),
                     ).fetchone()
-                    session_id = row["id"] if row else None
-                    print(f"[database] Session uuid already exists — using existing id={session_id}")
+                    return row["id"] if row else None
 
                 if session_id is None:
                     conn.rollback()
                     return None
+
+                if session_metadata.get("drill_key") == "fitts_pvt_clay":
+                    round_rows = []
+                    for round_record in session_metadata.get("rounds", []):
+                        round_rows.append((
+                            session_id, round_record.get("round_number"),
+                            round_record.get("attempt", 1),
+                            str(round_record.get("preset_label") or ""),
+                            int(bool(round_record.get("preset_mixed"))),
+                            str(round_record.get("ended_reason") or ""),
+                            round_record.get("started_at"), round_record.get("ended_at"),
+                            json.dumps(round_record.get("metrics") or {}),
+                        ))
+                    if round_rows:
+                        conn.executemany(
+                            """INSERT INTO rounds
+                               (session_id, round_number, attempt, preset_label,
+                                preset_mixed, ended_reason, started_at, ended_at, metrics_json)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", round_rows)
 
                 # ── trials rows ───────────────────────────────────────────────
                 trial_rows = []
@@ -303,13 +382,16 @@ def insert_session(
                         str(t.get("target_name", "")),
                         t.get("round_number") or t.get("round", 0),
                         t.get("t0") or t.get("activated_at"),
+                        t.get("round_attempt", 1),
+                        str(t.get("component", "")),
                     ))
                 if trial_rows:
                     conn.executemany(
                         """INSERT INTO trials
                            (session_id, trial_number, outcome, rt_ms,
-                            target_type, target_name, round_number, t0)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                            target_type, target_name, round_number, t0,
+                            round_attempt, component)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         trial_rows,
                     )
 
@@ -321,13 +403,14 @@ def insert_session(
                     "hrv_rmssd_ms":   "hrv_n_intervals",
                     "pupil_l_mean_mm": "pupil_l_n",
                     "pupil_r_mean_mm": "pupil_r_n",
+                    "pupil_mean_mm":   "pupil_n",
                 }
                 bio_rows = []
-                for key, value in biosignals_dict.items():
+                for key, n_key in _N_KEYS.items():
+                    value = biosignals_dict.get(key)
                     if not isinstance(value, (int, float)):
                         continue
-                    n_key = _N_KEYS.get(key, "")
-                    n_samples = biosignals_dict.get(n_key, 0) if n_key else 0
+                    n_samples = biosignals_dict.get(n_key, 0)
                     bio_rows.append((session_id, key, float(value), int(n_samples)))
                 if bio_rows:
                     conn.executemany(
@@ -415,6 +498,78 @@ def update_participant_name(session_uuid: str, new_name: str) -> tuple[bool, str
             conn.commit()
             print(f"[database] Session {session_uuid!r} re-assigned to participant {new_name!r}")
             return True, f"Session updated to participant {new_name!r}"
+
+
+def confirm_fitts_round_participants(
+    session_uuid: str, session_name: str, assignments: list[dict]
+) -> tuple[bool, str]:
+    """Confirm every completed Fitts round's owner in one transaction."""
+    if not isinstance(assignments, list):
+        return False, "Round participants must be a list"
+    provided = {}
+    for item in assignments:
+        if not isinstance(item, dict):
+            return False, "Invalid round participant entry"
+        try:
+            key = (int(item["round_number"]), int(item.get("attempt", 1)))
+        except (KeyError, TypeError, ValueError):
+            return False, "Invalid round number or attempt"
+        name = str(item.get("participant_name") or "").strip()
+        if not name or name.casefold() == UNASSIGNED_PARTICIPANT.casefold():
+            return False, "Every completed round needs a participant name"
+        if key in provided:
+            return False, "Duplicate round participant entry"
+        provided[key] = name
+    with _lock:
+        with _connect() as conn:
+            session = conn.execute(
+                "SELECT id, drill_key, rounds_json FROM sessions WHERE session_uuid = ?", (session_uuid,)
+            ).fetchone()
+            if session is None or session["drill_key"] != "fitts_pvt_clay":
+                return False, "Fitts-PVT session not found"
+            rows = conn.execute(
+                "SELECT id, round_number, attempt, ended_reason FROM rounds WHERE session_id = ?",
+                (session["id"],),
+            ).fetchall()
+            valid = {(row["round_number"], row["attempt"]) for row in rows}
+            required = {(row["round_number"], row["attempt"]) for row in rows
+                        if row["ended_reason"] == "completed"}
+            if not required <= provided.keys():
+                return False, "Assign a participant to each completed round"
+            if not provided.keys() <= valid:
+                return False, "Round participant entry does not match this session"
+
+            def participant_id(name: str) -> str:
+                row = conn.execute(
+                    "SELECT id FROM participants WHERE participant_name = ? COLLATE NOCASE",
+                    (name,),
+                ).fetchone()
+                if row:
+                    return row["id"]
+                new_id = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO participants (id, participant_name, created_at) VALUES (?, ?, ?)",
+                    (new_id, name, datetime.datetime.now(datetime.timezone.utc).isoformat()),
+                )
+                return new_id
+
+            for row in rows:
+                key = (row["round_number"], row["attempt"])
+                if key in provided:
+                    conn.execute("UPDATE rounds SET participant_id = ? WHERE id = ?",
+                                 (participant_id(provided[key]), row["id"]))
+            round_snapshots = json.loads(session["rounds_json"] or "[]")
+            for snapshot in round_snapshots:
+                key = (snapshot.get("round_number"), snapshot.get("attempt", 1))
+                if key in provided:
+                    snapshot["participant_name"] = provided[key]
+            conn.execute("UPDATE sessions SET rounds_json = ? WHERE id = ?",
+                         (json.dumps(round_snapshots), session["id"]))
+            if session_name.strip():
+                conn.execute("UPDATE sessions SET participant_id = ? WHERE id = ?",
+                             (participant_id(session_name.strip()), session["id"]))
+            conn.commit()
+    return True, "Round participants confirmed"
 
 
 def delete_session(session_uuid: str) -> bool:
@@ -543,25 +698,118 @@ def get_sessions_for_participant(
                 SELECT s.id, s.session_uuid, s.drill_key, s.task_type,
                        s.scenario_name, s.date, s.started_at, s.stopped_at,
                        s.duration_s, s.metrics_json, s.biosignals_json,
-                       s.notes, s.saved_at, s.record_path
+                       s.notes, s.saved_at, s.record_path, s.source,
+                       s.external_scenario_id, s.capture_status,
+                       s.native_context_json, s.custom_scenario_name,
+                       p.participant_name AS session_participant_name
                 FROM sessions s
                 JOIN participants p ON p.id = s.participant_id
                 WHERE p.participant_name = ? COLLATE NOCASE
+                  AND NOT (s.drill_key = 'fitts_pvt_clay' AND s.source = 'custom')
             """
             params: list = [participant_name]
             if drill_key:
                 sql += " AND s.drill_key = ?"
                 params.append(drill_key)
             sql += " ORDER BY s.saved_at ASC, s.id ASC"
-            if limit:
-                sql += f" LIMIT {int(limit)}"
-
             rows = conn.execute(sql, params).fetchall()
+            round_rows = conn.execute("""
+                SELECT s.session_uuid, s.drill_key, s.task_type, s.scenario_name,
+                       s.date, s.started_at, s.stopped_at, s.saved_at, s.source,
+                       s.capture_status, r.round_number, r.attempt AS round_attempt,
+                       r.preset_label, r.preset_mixed, r.ended_reason,
+                       r.started_at AS round_started_at, r.ended_at AS round_ended_at,
+                       r.metrics_json
+                FROM rounds r
+                JOIN sessions s ON s.id = r.session_id
+                JOIN participants p ON p.id = r.participant_id
+                WHERE p.participant_name = ? COLLATE NOCASE
+                  AND s.drill_key = 'fitts_pvt_clay' AND s.source = 'custom'
+                  AND r.ended_reason = 'completed'
+                  AND (? IS NULL OR s.drill_key = ?)
+                ORDER BY s.saved_at, r.started_at, r.id
+            """, (participant_name, drill_key, drill_key)).fetchall()
 
     result = []
     for row in rows:
         d = dict(row)
         d["metrics"]    = json.loads(d.pop("metrics_json", "{}") or "{}")
         d["biosignals"] = json.loads(d.pop("biosignals_json", "{}") or "{}")
+        d["native_context"] = json.loads(d.pop("native_context_json", "{}") or "{}")
+        d["metrics_source"] = d["source"]
         result.append(d)
+    for row in round_rows:
+        d = dict(row)
+        d["metrics"] = json.loads(d.pop("metrics_json") or "{}")
+        d["biosignals"] = {}
+        d["metrics_source"] = d["source"]
+        d["result_scope"] = "round"
+        d["duration_s"] = (d["round_ended_at"] - d["round_started_at"]
+                           if d["round_ended_at"] is not None and d["round_started_at"] is not None
+                           else None)
+        result.append(d)
+    result.sort(key=lambda item: (item.get("saved_at") or "", item.get("round_started_at") or 0))
+    if limit:
+        result = result[-limit:]
     return result
+
+
+def get_session_detail(session_uuid: str, participant_name: str,
+                       round_number: int | None = None, attempt: int = 1) -> dict | None:
+    """Return one participant-owned session with its saved trials and round detail."""
+    with _lock:
+        with _connect() as conn:
+            row = conn.execute("""
+                SELECT s.session_uuid, s.drill_key, s.task_type, s.scenario_name,
+                       s.date, s.started_at, s.stopped_at, s.duration_s,
+                       s.metrics_json, s.biosignals_json, s.rounds_json,
+                       s.source, s.external_scenario_id, s.capture_status,
+                       s.native_context_json, s.custom_scenario_name,
+                       p.participant_name AS session_participant_name
+                FROM sessions s JOIN participants p ON p.id = s.participant_id
+                WHERE s.session_uuid = ? AND (
+                    p.participant_name = ? COLLATE NOCASE OR EXISTS (
+                        SELECT 1 FROM rounds r JOIN participants rp ON rp.id = r.participant_id
+                        WHERE r.session_id = s.id AND rp.participant_name = ? COLLATE NOCASE))
+            """, (session_uuid, participant_name, participant_name)).fetchone()
+            if row is None:
+                return None
+            trials = [dict(trial) for trial in conn.execute("""
+                SELECT t.trial_number, t.outcome, t.rt_ms, t.target_type,
+                       t.target_name, t.round_number, t.round_attempt,
+                       t.component, t.t0
+                FROM trials t JOIN sessions s ON s.id = t.session_id
+                WHERE s.session_uuid = ? ORDER BY t.id
+            """, (session_uuid,)).fetchall()]
+    detail = dict(row)
+    for field in ("metrics", "biosignals", "rounds", "native_context"):
+        detail[field] = json.loads(detail.pop(field + "_json"))
+    detail["metrics_source"] = detail["source"]
+    detail["trials"] = trials
+    if (detail["drill_key"] == "fitts_pvt_clay" and round_number is None
+            and detail["session_participant_name"].casefold() != participant_name.casefold()):
+        return None
+    if round_number is not None and detail["drill_key"] == "fitts_pvt_clay":
+        selected = [item for item in detail["rounds"]
+                    if item.get("round_number") == round_number
+                    and item.get("attempt", 1) == attempt]
+        if not selected:
+            return None
+        with _lock:
+            with _connect() as conn:
+                owner = conn.execute("""
+                    SELECT 1 FROM rounds r JOIN sessions s ON s.id = r.session_id
+                    JOIN participants p ON p.id = r.participant_id
+                    WHERE s.session_uuid = ? AND r.round_number = ? AND r.attempt = ?
+                      AND p.participant_name = ? COLLATE NOCASE
+                """, (session_uuid, round_number, attempt, participant_name)).fetchone()
+        if owner is None:
+            return None
+        detail["rounds"] = selected
+        detail["trials"] = [trial for trial in trials
+                            if trial["round_number"] == round_number
+                            and trial["round_attempt"] == attempt]
+        detail["metrics"] = selected[0].get("metrics") or {}
+        detail["biosignals"] = {}
+        detail["result_scope"] = "round"
+    return detail

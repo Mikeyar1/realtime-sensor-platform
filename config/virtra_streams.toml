@@ -1,0 +1,267 @@
+# VirTra event-source and custom-LSL contract configuration.
+#
+# This file describes stream identity, source policy, lifecycle events, payload
+# paths, and drill components. The Python scoring adapter named by task_type must
+# exist before selecting custom metrics for a new drill. Configuration can
+# map events and fields; it cannot invent Fitts outcome or metric formulas.
+#
+# Paths are relative to the decoded event JSON (for example, data.shot.shot_id).
+# Lists of paths are tried from left to right. Names and phase values are matched
+# without case sensitivity. Keep canonical_key stable once sessions are saved.
+
+schema_version = 2
+
+[streams.native]
+names = ["V_300"]
+types = ["VirTraEvents"]
+match = "any"                      # name OR type, matching current native routing
+
+[streams.custom]
+names = ["virtra_lsl"]
+types = ["VirTra Events"]
+match = "type"                     # custom outlets may change name between drills
+
+[custom_lifecycle]
+allow_round_start_without_scenario_start = true
+
+[lifecycle]
+scenario_start = ["Scenario Started"]
+scenario_stop = ["Scenario Stopped", "Scenario Ended", "Scenario Destroyed"]
+round_start = ["Round Started"]
+round_complete = ["Round Completed"]
+round_reset = ["Round Reset"]
+component_change = ["Phase Changed"]
+
+[rounds]
+aggregate_statuses = ["completed"]
+display_reset_rounds = true
+display_incomplete_rounds = true
+reuse_round_number_creates_attempt = true
+aggregate_duration_basis = "sum_round_trial_spans"
+
+[fields]
+drill_type = ["drill_type"]
+external_scenario_id = ["scenario_id"]
+scenario_name = ["scenario_name", "scenario_display_name"]
+schema_version = ["schema_version", "lsl_schema_version"]
+round_number = ["round"]
+component = ["phase", "data.phase"]
+scenario_time_seconds = ["scenario_time_seconds"]
+timestamp_utc = ["timestamp_utc"]
+settings = ["data.settings", "data"]
+script_metrics = ["data.metrics"]
+target_id = ["data.target_id", "data.target.target_id", "data.shot.entity_id", "data.entity_id"]
+shot_id = ["data.shot.shot_id", "data.shot_id"]
+trial_index = ["data.trial_index", "data.target.trial_index", "data.presentation_index"]
+reaction_time_seconds = ["data.shot.reaction_time_seconds", "data.reaction_time_seconds"]
+
+# Native drills currently scored from V_300. Listed aliases take precedence over
+# drill_registry.toml; unlisted legacy aliases still resolve through that file.
+[drills.pvt]
+metrics_source = "native"
+canonical_key = "pvt"
+label = "PVT"
+task_type = "PVT"
+metric_module = "pvt"
+native_scenarios = ["PVT", "Snake Drill"]
+custom_drill_types = []
+default_component = "pvt"
+
+[drills.pvt.components.pvt]
+label = "PVT"
+phase_values = []
+metric_set = "PVT"
+scoring_status = "implemented"
+
+[drills.behavioral_discrimination]
+metrics_source = "native"
+canonical_key = "behavioral_discrimination"
+label = "Behavioral Discrimination"
+task_type = "DISCRIMINATION"
+metric_module = "discrimination"
+native_scenarios = ["basePVT_GNG_Actor", "Drill 3B"]
+custom_drill_types = []
+default_component = "discrimination"
+
+[drills.behavioral_discrimination.components.pvt]
+label = "PVT"
+phase_values = []              # native tracker infers this from target names
+metric_set = "PVT"
+scoring_status = "implemented"
+
+[drills.behavioral_discrimination.components.discrimination]
+label = "Discrimination"
+phase_values = []              # native tracker infers this from target names
+metric_set = "DISCRIMINATION"
+scoring_status = "implemented"
+
+# An implemented custom drill. The aliases currently resolve to the GNG tracker.
+[drills.multicolor_gng]
+metrics_source = "custom"
+canonical_key = "gng"
+label = "Go/No-Go"
+task_type = "GNG"
+metric_module = "gng"
+native_scenarios = []
+custom_drill_types = ["multicolor_gng", "GNG_ClayColors"]
+default_component = "gng"
+
+[drills.multicolor_gng.events]
+trial_start = ["Target Appeared"]
+shot_fired = ["Shot Fired"]
+shot_hit = ["Shot Hit"]
+shot_miss = ["Shot Missed"]
+trial_timeout = ["Target Timed Out"]
+script_metrics = ["Metrics Updated"]
+
+[drills.multicolor_gng.fields]
+target_id = ["data.target_id", "data.target.target_id", "data.entity_id"]
+shot_id = ["data.shot_id", "data.shot.shot_id"]
+expected_action = ["data.expected_action", "data.target.expected_action"]
+result = ["data.gng_classification", "data.classification"]
+script_metrics = ["data.metrics"]
+
+[drills.multicolor_gng.components.gng]
+label = "Go/No-Go"
+phase_values = []                 # this single-component stream has no phase field
+metric_set = "GNG"
+scoring_status = "implemented"
+
+# Observed in dnlc2.db. The custom PVT/GNG adapter is not implemented yet.
+# This capture has pvt and gng phases; its name contains Fitts, but it does not
+# emit a distinct fitts phase. Keep that distinction explicit.
+[drills.basepvt_fitts_gng_clay]
+metrics_source = "disabled"
+canonical_key = "pvt_fitts_gng"
+label = "PVT / Go-No-Go"
+task_type = "COMPOSITE"
+metric_module = ""
+native_scenarios = ["base PVT Fitts - GNG clay"]
+custom_drill_types = ["basepvt_fitts_gng_clay"]
+default_component = "pvt"
+
+[drills.basepvt_fitts_gng_clay.events]
+trial_start = ["Target Appeared"]
+shot_fired = ["Shot Fired"]
+shot_hit = ["Shot Hit"]
+shot_miss = ["Shot Missed"]
+trial_timeout = ["Target Timed Out"]
+correct_rejection = ["Correct Rejection"]
+script_metrics = ["Metrics Updated"]
+
+[drills.basepvt_fitts_gng_clay.fields]
+target_id = ["data.target.target_id", "data.target_id", "data.shot.entity_id", "data.entity_id"]
+shot_id = ["data.shot.shot_id", "data.shot_id"]
+script_metrics = ["data.metrics"]
+
+[drills.basepvt_fitts_gng_clay.components.pvt]
+label = "PVT"
+phase_values = ["pvt"]
+metric_set = "PVT"
+scoring_status = "pending_adapter"
+
+[drills.basepvt_fitts_gng_clay.components.gng]
+label = "Go/No-Go"
+phase_values = ["gng"]
+metric_set = "GNG"
+scoring_status = "pending_adapter"
+
+# These two scenarios currently use the native PVT tracker. Once a real custom
+# PVT/Fitts adapter and contract ship, changing metrics_source to "custom" is the
+# operator switch. Replace the placeholder drill_type if the script uses another.
+[drills.pvt_fitts]
+metrics_source = "native"
+canonical_key = "pvt_fitts"
+label = "PVT / Fitts"
+task_type = "PVT_FITTS"
+metric_module = ""
+native_adapter = "PVT"
+native_result_key = "pvt"
+native_scenarios = ["LVL1_PVT_FITTS_ASSESSMENT", "basePVT_Fitts_Clay"]
+custom_drill_types = ["pvt_fitts"] # replace/add the actual script drill_type at the lab
+default_component = "pvt"
+
+[drills.pvt_fitts.events]
+trial_start = []
+trial_end = []
+script_metrics = ["Metrics Updated"]
+
+[drills.pvt_fitts.fields]
+target_id = []
+trial_index = []
+reaction_time_seconds = []
+script_metrics = []
+
+[drills.pvt_fitts.components.pvt]
+label = "PVT"
+phase_values = ["pvt"]
+metric_set = "PVT"
+scoring_status = "pending_stream"
+
+[drills.pvt_fitts.components.fitts]
+label = "Fitts"
+phase_values = ["fitts"]         # edit if VirTra emits another phase value
+metric_set = "FITTS"
+scoring_status = "pending_stream"
+
+[drills.pvt_fitts.components.fitts.events]
+start = []                        # enter the event name that begins Fitts
+component_start = []              # event name/code that announces Fitts
+trial_start = []                  # events needed for Fitts scoring
+trial_end = []
+script_metrics = []
+
+[drills.pvt_fitts.components.fitts.fields]
+target_id = []
+trial_index = []
+movement_time_seconds = []
+target_width_meters = []
+target_distance_meters = []
+endpoint_error_meters = []
+script_metrics = []
+
+# Switch metrics_source between "native" and "custom" for this scenario.
+# Native uses the existing PVT tracker for UI testing; custom uses the script's
+# virtra_lsl stream and per-round target-response tracker. Restart LabReview
+# after changing this value. The script does not emit Fitts throughput fields.
+[drills.fitts_pvt_clay]
+metrics_source = "custom"
+category_id = "pvt_fitts"
+assessment_profile = "pvt_fitts_core"
+default_preset_label = "Default"
+canonical_key = "fitts_pvt_clay"
+label = "Fitts-PVT Clay"
+task_type = "PVT_FITTS"
+metric_module = "fitts_pvt_clay"
+native_adapter = "PVT"
+native_result_key = "pvt"
+native_scenarios = ["Fitts-PVT_Clay"]
+custom_drill_types = ["fitts_pvt", "fitts_pvt_clay"]
+default_component = "pvt_fitts"
+
+[drills.fitts_pvt_clay.default_settings]
+active_distance_meters = 10
+active_visibility_duration_seconds = 2
+active_spawn_interval_seconds = 2
+active_targets_per_round = 15
+active_concurrent_targets = 1
+
+[drills.fitts_pvt_clay.events]
+trial_start = ["Target Appeared"]
+shot_fired = ["Shot Fired"]
+shot_hit = ["Shot Hit"]
+shot_miss = ["Shot Missed"]
+trial_timeout = ["Target Timed Out"]
+script_metrics = ["Metrics Updated"]
+
+[drills.fitts_pvt_clay.fields]
+target_id = ["data.target.target_id", "data.shot.target.target_id", "data.target_id"]
+trial_index = ["data.target.presentation_index", "data.shot.target.presentation_index"]
+reaction_time_seconds = ["data.shot.reaction_time_seconds", "data.reaction_time_seconds"]
+script_metrics = ["data.metrics"]
+
+[drills.fitts_pvt_clay.components.pvt_fitts]
+label = "Target response"
+phase_values = []
+metric_set = "PVT_FITTS"
+scoring_status = "implemented"

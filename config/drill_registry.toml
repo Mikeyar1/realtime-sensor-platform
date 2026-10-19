@@ -83,8 +83,8 @@ description   = "Sustained attention assessment — trainee responds to visual s
 scenarios     = [
     "PVT",
     "LVL1_PVT_FITTS_ASSESSMENT",
-    "LVL 1 PVT FITTS ASSESSMENT",
-    "PVT",
+    "basePVT_Fitts_Clay",
+    "Fitts-PVT_Clay",
     "Snake Drill",
 ]
 # Target filtering for PVT.
@@ -105,12 +105,19 @@ ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)", "end_of_ro
 # lapse_threshold = median_rt × lapse_multiplier (e.g. 843 ms × 2.0 = 1686 ms).
 lapse_multiplier = 1.5
 
+# Fitts-PVT Clay names its fixation target "neutral" and its stimulus grid
+# "neutral_0", "neutral_1", etc. Keep fixation out of native PVT trials.
+[cognitive_attributes.pvt.scenario_params."Fitts-PVT_Clay"]
+valid_targets = ["neutral_"]
+
 
 # ── Custom VirTra LSL Drills ─────────────────────────────────────────────────
 #
 # These are driven by the script-integrated custom LSL stream (name
 # "virtra_lsl", type "VirTra Events"), not by the native V_300 stream.
 # They resolve by the payload drill_type field instead of native scenario name.
+# Source policy, component names, event aliases, and field paths are configured
+# in virtra_streams.toml. Its listed custom aliases take precedence here.
 
 [custom_lsl_drills.multicolor_gng]
 drill_key     = "gng"
@@ -119,6 +126,12 @@ task_type     = "GNG"                # → cognitive_attributes/multicolor_gng/t
 metric_module = "gng"                # → cognitive_attributes/multicolor_gng/metrics.py
 description   = "Inhibitory control assessment driven by scenario-script custom LSL metadata."
 
+[custom_lsl_drills.GNG_ClayColors]
+drill_key     = "gng"
+label         = "Go/No-Go"
+task_type     = "GNG"                # → cognitive_attributes/multicolor_gng/tracker.py
+metric_module = "gng"                # → cognitive_attributes/multicolor_gng/metrics.py
+description   = "Inhibitory control assessment driven by scenario-script custom LSL metadata."
 
 [cognitive_attributes.behavioral_discrimination]
 label         = "Behavioral Discrimination"
@@ -126,7 +139,7 @@ task_type     = "DISCRIMINATION"     # → cognitive_attributes/discrimination/t
 metric_module = "discrimination"     # → cognitive_attributes/discrimination/metrics.py
 description   = "Two-phase drill: PVT vigilance block, then threat/non-threat discrimination under time pressure."
 scenarios     = [
-    "Drill 3A (Single-Target Discrimination)",
+    "basePVT_GNG_Actor",
     "Drill 3B",
 ]
 

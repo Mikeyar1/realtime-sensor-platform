@@ -6,7 +6,7 @@ cognitive_attributes metric functions. No external process needed.
 
 Responsibilities:
   1. Compute summary metrics from the trial list via the attribute's metrics function.
-  2. Auto-save session to the SQLite database (sole persistence layer).
+  2. Auto-save legacy sessions; round assessments are durable at round closure.
   3. Broadcast session.metrics_ready to all connected Frontend clients.
   4. Cache session_record + metrics for operator-driven confirm/discard flow.
      - db.confirm_session — updates participant name in DB
@@ -18,6 +18,7 @@ import traceback
 from typing import Callable, Optional
 
 from cognitive_attributes import ATTRIBUTE_REGISTRY
+from assessments.catalog import DRILLS
 
 
 
@@ -97,28 +98,81 @@ class AnalysisServiceClient:
         print(f"[AnalysisServiceClient] Post-scenario: drill={drill_key!r}"
               f"  scenario={scenario_name!r}  trials={n_trials}")
 
-        if n_trials == 0:
+        if n_trials == 0 and not session_record.get("rounds"):
             print("[AnalysisServiceClient] No trials recorded — skipping metric computation")
             await self._broadcast({
                 "type":      "session.metrics_ready",
                 "drill_key": drill_key,
+                "session_uuid": session_record.get("session_id", ""),
                 "metrics":   None,
                 "error":     "no_trials",
             })
             return
 
         # 2. Compute metrics
+        metric_record = session_record
+        if session_record.get("source") == "custom":
+            completed = {(r.get("round_number"), r.get("attempt", 1))
+                         for r in session_record.get("rounds", [])
+                         if r.get("ended_reason") == "completed"}
+            metric_record = dict(session_record)
+            metric_record["trials"] = [trial for trial in session_record.get("trials", [])
+                                       if (trial.get("round_number"),
+                                           trial.get("round_attempt", 1)) in completed]
+            metric_record["wild_shots"] = sum(
+                item.get("count", 0) for item in session_record.get("wild_shots_by_round", [])
+                if (item.get("round_number"), item.get("round_attempt", 1)) in completed)
         metrics = await self._loop.run_in_executor(
-            None, _compute_metrics_for_session, session_record
-        )
+            None, _compute_metrics_for_session, metric_record
+        ) if (metric_record.get("trials") or
+              (drill_key in DRILLS and session_record.get("rounds"))) else None
+        if metrics is None and session_record.get("source") == "custom":
+            completed_rounds = sum(r.get("ended_reason") == "completed"
+                                   for r in session_record.get("rounds", []))
+            if session_record.get("task_type") == "PVT_FITTS":
+                metrics = {"duration_s": None,
+                           "duration_basis": "sum_completed_round_trial_windows",
+                           "completed_rounds": completed_rounds,
+                           "scoring_status": "no_scored_trials"}
+            else:
+                metrics = {"duration_s": session_record.get("duration_s"),
+                           "duration_basis": "scenario_elapsed",
+                           "completed_rounds": completed_rounds,
+                           "scoring_status": ("pending_stream_contract" if completed_rounds
+                                              else "no_completed_rounds")}
 
         if metrics is None:
             print("[AnalysisServiceClient] No metrics produced for this cognitive attribute")
             await self._broadcast({
                 "type":      "session.metrics_ready",
                 "drill_key": drill_key,
+                "session_uuid": session_record.get("session_id", ""),
                 "metrics":   None,
                 "error":     "metrics_unavailable",
+            })
+            return
+
+        # PVT/Fitts rounds are checkpointed at their own boundaries. A legacy
+        # session insert here would create a second, conflicting result owner.
+        if drill_key in DRILLS:
+            from . import round_repository
+            run_id = session_record.get("session_id", "")
+            snapshot = await self._loop.run_in_executor(
+                None, round_repository.get_run, run_id) if round_repository.available() else None
+            self._pending_metrics = metrics
+            self._pending_session_record = session_record
+            self._pending_session_metadata = {
+                "drill_key": drill_key, "scenario_name": scenario_name,
+                "session_uuid": run_id, "participant_name": "",
+            }
+            await self._broadcast({
+                "type": "session.metrics_ready", "drill_key": drill_key,
+                "scenario_name": scenario_name, "metrics": metrics,
+                "session_uuid": run_id, "participant_name": "",
+                "auto_saved": bool(snapshot),
+                "capture_status": session_record.get("capture_status", "complete"),
+                "rounds": snapshot["rounds"] if snapshot else session_record.get("rounds", []),
+                "assessment_run": snapshot,
             })
             return
 
@@ -139,6 +193,12 @@ class AnalysisServiceClient:
             "biosignals":    meta.get("biosignals", session_record.get("biosignals", {})),
             # Trials for per-trial DB rows
             "trials":        session_record.get("trials", []),
+            "rounds":        session_record.get("rounds", []),
+            "source":        session_record.get("source", "native"),
+            "native_context": session_record.get("native_context", {}),
+            "custom_scenario_name": session_record.get("custom_scenario_name", ""),
+            "capture_status": session_record.get("capture_status", "complete"),
+            "external_scenario_id": session_record.get("external_scenario_id", ""),
         }
 
         participant_name = (
@@ -160,6 +220,7 @@ class AnalysisServiceClient:
             await self._broadcast({
                 "type": "session.metrics_ready",
                 "drill_key": drill_key,
+                "session_uuid": session_record.get("session_id", ""),
                 "metrics": metrics,
                 "error": "save_failed",
             })
@@ -188,6 +249,8 @@ class AnalysisServiceClient:
             "session_uuid":     session_uuid,
             "participant_name": self._pending_session_metadata["participant_name"],
             "auto_saved":       db_session_id is not None,
+            "capture_status":   session_record.get("capture_status", "complete"),
+            "rounds":           session_record.get("rounds", []),
         })
         print(f"[AnalysisServiceClient] Metrics ready + auto-saved: "
               f"drill={drill_key!r}  participant={participant_name!r}  db_id={db_session_id}")

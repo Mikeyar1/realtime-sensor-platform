@@ -65,6 +65,7 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 ; onlyifdoesntexist means updates won't clobber the operator's local edits.
 Source: "backend\config.toml";           DestDir: "{userappdata}\{#AppName}";          Flags: onlyifdoesntexist
 Source: "config\drill_registry.toml";    DestDir: "{userappdata}\{#AppName}\config";   Flags: onlyifdoesntexist
+Source: "config\virtra_streams.toml";     DestDir: "{userappdata}\{#AppName}\config";   Flags: onlyifdoesntexist
 
 [Dirs]
 ; Create the session data output folder so the app can write to it immediately

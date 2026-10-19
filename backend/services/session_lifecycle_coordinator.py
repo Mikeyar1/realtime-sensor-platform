@@ -4,7 +4,8 @@ session_lifecycle_coordinator.py — Session coordinator and high-level state ma
 Routes incoming WebSocket commands to VirTraScenarioOrchestrator.
 Owns the high-level live session state: IDLE ↔ LISTENING ↔ LIVE.
 
-Session persistence flow (auto-save, no save button):
+Legacy session persistence flow (round assessments use round.save or
+run.save_remaining, with an end-of-run compatibility bridge):
   1. VirTra stop event or session.stop → analysis_service_client auto-saves to DB.
   2. Frontend receives session.metrics_ready with session_uuid + participant_name.
   3. Frontend shows Confirm / Discard panel with a participant name dropdown.
@@ -17,6 +18,7 @@ Session persistence flow (auto-save, no save button):
 
 import asyncio
 import time
+import uuid
 from typing import Callable, Optional
 
 from api.message_types import (
@@ -34,6 +36,7 @@ from api.message_types import (
 )
 from .virtra_scenario_orchestrator import VirTraScenarioOrchestrator
 from .session_data_writer import write_session_record
+from . import round_repository
 
 try:
     import config as backend_config
@@ -63,9 +66,29 @@ def _db_confirm(session_uuid: str, new_name: str) -> tuple[bool, str]:
         return False, str(e)
 
 
+def _db_confirm_fitts(session_uuid: str, session_name: str,
+                      assignments: list[dict]) -> tuple[bool, str]:
+    try:
+        run = round_repository.get_run(session_uuid) if round_repository.available() else None
+        if run:
+            by_number = {(r["round_number"], r["attempt"]): r["id"] for r in run["rounds"]}
+            explicit = {by_number[(int(item["round_number"]), int(item.get("attempt") or 1))]:
+                        str(item["participant_name"]).strip() for item in assignments}
+            round_repository.save_remaining(session_uuid, session_name,
+                                            str(uuid.uuid4()), explicit)
+            return True, "Rounds saved"
+        from services.database import confirm_fitts_round_participants
+        return confirm_fitts_round_participants(session_uuid, session_name, assignments)
+    except Exception as e:
+        print(f"[SessionLifecycleCoordinator] Fitts round confirm error: {e}")
+        return False, str(e)
+
+
 def _db_discard(session_uuid: str) -> bool:
     """Thread-safe DB call — delete session + JSON from disk."""
     try:
+        if round_repository.available() and round_repository.get_run(session_uuid):
+            return round_repository.discard_unsaved_run(session_uuid)
         from services.database import delete_session  # type: ignore
         return delete_session(session_uuid)
     except Exception as e:
@@ -83,6 +106,13 @@ def _db_get_sessions(participant_name: str, drill_key: str | None, limit: int | 
     except Exception as e:
         print(f"[SessionLifecycleCoordinator] DB get_sessions error: {e}")
         return []
+
+
+def _db_get_session_detail(session_uuid: str, participant_name: str,
+                           round_number: int | None = None,
+                           attempt: int = 1) -> dict | None:
+    from services.database import get_session_detail  # type: ignore
+    return get_session_detail(session_uuid, participant_name, round_number, attempt)
 
 
 def _db_delete_history_session(session_uuid: str, participant_name: str) -> bool:
@@ -153,6 +183,13 @@ class SessionLifecycleCoordinator:
                     "no_active_drill", "There is no active drill to stop", "session.stop"
                 ))
 
+        elif msg_type in {
+            "round.save", "round.reassign", "run.save_remaining", "round.assignment.update",
+            "run.snapshot.get", "history.rounds.query", "history.round.get",
+            "participants.search", "history.round.delete", "history.participant.delete",
+        }:
+            await self._handle_assessment_command(websocket, msg)
+
         # Legacy save_record — kept for backwards compat; forwards to confirm flow
         elif msg_type == MSG_SESSION_SAVE_RECORD:
             await self._handle_legacy_save_record(websocket, msg)
@@ -188,6 +225,23 @@ class SessionLifecycleCoordinator:
         elif msg_type == MSG_PERF_QUERY:
             await self._handle_perf_query(websocket, msg)
 
+        elif msg_type == "perf.session_detail":
+            session_uuid = str(msg.get("session_uuid", "")).strip()
+            participant_name = str(msg.get("participant_name", "")).strip()
+            round_number = msg.get("round_number")
+            round_number = int(round_number) if round_number is not None else None
+            attempt = int(msg.get("round_attempt") or 1)
+            detail = await self._loop.run_in_executor(
+                None, _db_get_session_detail, session_uuid, participant_name,
+                round_number, attempt)
+            await self._send(websocket, {
+                "type": "perf.session_detail_result",
+                "session_uuid": session_uuid,
+                "round_number": round_number,
+                "round_attempt": attempt if round_number is not None else None,
+                "session": detail,
+            })
+
         elif msg_type in (MSG_PERF_DELETE_SESSION, MSG_PERF_DELETE_PARTICIPANT):
             await self._handle_perf_delete(websocket, msg)
 
@@ -195,6 +249,67 @@ class SessionLifecycleCoordinator:
             print(f"[SessionLifecycleCoordinator] Unknown message type: {msg_type!r} — ignoring")
 
     # ── Database handlers ────────────────────────────────────────────────────
+
+    async def _handle_assessment_command(self, websocket, msg: dict):
+        command = msg["type"]
+        request_id = str(msg.get("request_id") or uuid.uuid4())
+        try:
+            if command == "round.save":
+                result = await self._loop.run_in_executor(
+                    None, round_repository.save_round, str(msg.get("round_id", "")),
+                    str(msg.get("participant_name", "")), request_id,
+                    msg.get("expected_revision"))
+            elif command == "round.reassign":
+                result = await self._loop.run_in_executor(
+                    None, round_repository.reassign_round, str(msg.get("round_id", "")),
+                    str(msg.get("participant_name", "")), request_id,
+                    msg.get("expected_revision"))
+            elif command == "run.save_remaining":
+                result = await self._loop.run_in_executor(
+                    None, round_repository.save_remaining, str(msg.get("run_id", "")),
+                    str(msg.get("participant_name", "")), request_id,
+                    msg.get("explicit_names") or {})
+            elif command == "round.assignment.update":
+                result = await self._loop.run_in_executor(
+                    None, round_repository.set_draft_participant,
+                    str(msg.get("round_id", "")), str(msg.get("participant_name", "")),
+                    msg.get("expected_revision"))
+            elif command == "run.snapshot.get":
+                result = await self._loop.run_in_executor(
+                    None, round_repository.get_run, str(msg.get("run_id", "")))
+            elif command == "history.rounds.query":
+                result = await self._loop.run_in_executor(
+                    None, lambda: round_repository.list_history(
+                        str(msg.get("participant_name", "")),
+                        scenario_name=str(msg.get("scenario_name", "")),
+                        preset_label=str(msg.get("preset_label", "")),
+                        limit=int(msg.get("limit") or 100)))
+            elif command == "history.round.get":
+                result = await self._loop.run_in_executor(
+                    None, round_repository.get_saved_round_for_participant,
+                    str(msg.get("round_id", "")), str(msg.get("participant_name", "")))
+            elif command == "participants.search":
+                result = await self._loop.run_in_executor(None, round_repository.list_participants)
+            elif command == "history.round.delete":
+                result = await self._loop.run_in_executor(
+                    None, round_repository.delete_round, str(msg.get("round_id", "")),
+                    str(msg.get("participant_name", "")))
+            else:
+                result = await self._loop.run_in_executor(
+                    None, round_repository.delete_participant_history,
+                    str(msg.get("participant_name", "")))
+            await self._send(websocket, {
+                "type": "assessment.command_result", "command": command,
+                "request_id": request_id, "round_id": msg.get("round_id"),
+                "run_id": msg.get("run_id"), "success": True, "result": result,
+            })
+        except Exception as exc:
+            print(f"[SessionLifecycleCoordinator] Assessment command {command!r} failed: {exc}")
+            await self._send(websocket, {
+                "type": "assessment.command_result", "command": command,
+                "request_id": request_id, "round_id": msg.get("round_id"),
+                "run_id": msg.get("run_id"), "success": False, "error": str(exc),
+            })
 
     async def _handle_db_get_participants(self, websocket):
         """Return all known participant names for the frontend dropdown."""
@@ -213,9 +328,13 @@ class SessionLifecycleCoordinator:
         participant_name = str(msg.get("participant_name", "")).strip()
         notes            = str(msg.get("notes", "")).strip()
 
-        success, detail = await self._loop.run_in_executor(
-            None, _db_confirm, session_uuid, participant_name
-        )
+        if msg.get("round_participants") is not None:
+            success, detail = await self._loop.run_in_executor(
+                None, _db_confirm_fitts, session_uuid, participant_name,
+                msg["round_participants"])
+        else:
+            success, detail = await self._loop.run_in_executor(
+                None, _db_confirm, session_uuid, participant_name)
 
         response = {
             "type":             MSG_DB_SESSION_SAVED,
@@ -289,6 +408,7 @@ class SessionLifecycleCoordinator:
         )
         await self._send(websocket, {
             "type":             MSG_PERF_RESULT,
+            "request_id":       msg.get("request_id"),
             "participant_name": participant_name,
             "drill_key":        drill_key or "",
             "sessions":         sessions,

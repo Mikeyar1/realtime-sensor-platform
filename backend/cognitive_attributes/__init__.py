@@ -22,6 +22,8 @@ from .multicolor_gng.metrics import compute_live_metrics as _gng_metrics
 
 from .discrimination.tracker import DiscriminationTracker
 from .discrimination.metrics import compute_live_metrics as _discrimination_metrics
+from .composite_custom import CompositeCustomTracker
+from .fitts_pvt_clay import FittsPvtClayTracker, compute_metrics as _fitts_pvt_clay_metrics
 
 # task_type (uppercase, matches task_type field in drill_registry.toml)
 #     → (TrackerClass, metrics_function)
@@ -39,6 +41,8 @@ ATTRIBUTE_REGISTRY: dict[str, tuple] = {
     "PVT": (PvtTracker, _pvt_metrics),
        "GNG": (MulticolorGngTracker, _gng_metrics),
     "DISCRIMINATION": (DiscriminationTracker, _discrimination_metrics),
+    "PVT_FITTS": (FittsPvtClayTracker, _fitts_pvt_clay_metrics),
+    "COMPOSITE": (CompositeCustomTracker, lambda trials, record: {}),
 }
 
 __all__ = ["ATTRIBUTE_REGISTRY"]

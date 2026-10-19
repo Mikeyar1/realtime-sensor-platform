@@ -14,6 +14,7 @@
   flex-direction: column;
   gap:            var(--space-xl);
   width:          100%;   /* stretch to fill whatever container it's mounted in */
+  font-family:    'Segoe UI Variable Text', 'Aptos', 'Segoe UI', Arial, sans-serif;
   /* No internal padding — li-section already provides horizontal padding */
 }
 
@@ -49,8 +50,8 @@
 }
 
 .aar-scenario-name {
-  font-size:   1.1rem;
-  font-weight: 700;
+  font-size:   1rem;
+  font-weight: 650;
   color:       var(--text-primary);
   flex:        1;
 }
@@ -133,12 +134,12 @@
 }
 
 .aar-card--flash {
-  animation: aar-flash 0.35s ease-out;
+  animation: aar-flash 0.45s ease-out;
 }
 
 @keyframes aar-flash {
-  0%   { background: var(--accent-flash, rgba(96,165,250,0.18)); }
-  100% { background: var(--surface-card, rgba(255,255,255,0.04)); }
+  0%   { background: #eaf2ff; }
+  100% { background: #fff; }
 }
 
 /* State variants */
@@ -163,9 +164,10 @@
 
 /* Card elements */
 .aar-card-value {
-  font-family:    var(--font-mono);   /* Consolas/Monaco for numerical metrics */
-  font-size:      1.35rem;            /* Down from 1.5rem for cleaner visual balance */
-  font-weight:    600;
+  font-family:    'Segoe UI Variable Display', 'Aptos Display', 'Segoe UI', Arial, sans-serif;
+  font-size:      1.125rem;
+  font-weight:    650;
+  font-variant-numeric: tabular-nums;
   color:          var(--text-primary);
   line-height:    1.1;
   max-width:      100%;
@@ -178,8 +180,8 @@
 .aar-card-value--text,
 [id*="-ctx-"],
 .aar-card--text .aar-card-value {
-  font-family:    var(--font-family); /* Use clean UI font (Segoe UI/Arial) instead of wide monospace */
-  font-size:      0.95rem;            /* Proportional font size for long descriptive strings */
+  font-family:    'Segoe UI Variable Text', 'Aptos', 'Segoe UI', Arial, sans-serif;
+  font-size:      0.875rem;
   font-weight:    600;
   line-height:    1.25;
   color:          var(--text-primary);
@@ -189,7 +191,7 @@
 }
 
 .aar-card-label {
-  font-size:      0.78rem;
+  font-size:      0.75rem;
   font-weight:    600;
   color:          var(--text-secondary);
   overflow-wrap:  anywhere;
@@ -373,6 +375,12 @@
 }
 
 /* Three-drill light card system */
+.li-session-view {
+  --live-card-min-height: 108px;
+  --live-card-padding: var(--space-lg);
+  --live-card-radius: 12px;
+  --live-card-gap: var(--space-md);
+}
 .aar-standard { gap: var(--space-xl); }
 .aar-standard .aar-header { padding-bottom: 0; }
 .aar-standard .aar-construct {
@@ -392,23 +400,27 @@
   color: var(--text-secondary);
 }
 .aar-standard .aar-grid {
-  grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
-  gap: var(--space-md);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--live-card-gap, var(--space-md));
 }
 .aar-standard .aar-card {
-  min-height: 100px;
-  padding: var(--space-lg);
+  min-height: var(--live-card-min-height, 108px);
+  padding: var(--live-card-padding, var(--space-lg));
   background: #fff;
   border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border-radius: var(--live-card-radius, 12px);
   box-shadow: var(--shadow-panel);
 }
 .aar-standard .aar-card-value {
-  font-size: 1.5rem;
-  font-weight: 700;
+  font-size: 1.125rem;
+  font-weight: 650;
   color: var(--text-primary);
 }
-.aar-standard .aar-card-label { font-size: var(--font-size-sm); }
+.aar-standard .aar-card--text .aar-card-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.aar-standard .aar-card-label { font-size: 0.75rem; }
 .aar-standard .aar-info-btn::after {
   background: #fff;
   color: var(--text-primary);
@@ -427,6 +439,15 @@
   color: var(--accent-teal);
   background: #eaf8f6;
   border-color: #ccece7;
+}
+@media (max-width: 1600px) {
+  .aar-standard .aar-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 1200px) {
+  .aar-standard .aar-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .aar-standard .aar-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 700px) {
   .aar-standard .aar-grid { grid-template-columns: 1fr; }

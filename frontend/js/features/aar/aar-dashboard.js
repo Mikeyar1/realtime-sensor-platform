@@ -27,6 +27,7 @@ LabReview.AAR.Dashboard = (function () {
     'GNG':            () => LabReview.AAR.Standardized.create('GNG'),
     'PVT':            () => LabReview.AAR.Standardized.create('PVT'),
     'DISCRIMINATION': () => LabReview.AAR.Standardized.create('DISCRIMINATION'),
+    'PVT_FITTS':      () => LabReview.AAR.Standardized.create('PVT_FITTS'),
   };
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -139,14 +140,22 @@ LabReview.AAR.Dashboard = (function () {
     const resolver = TASK_TYPE_MODULES[taskType];
     _activeModule = resolver ? resolver() : null;
     if (!_activeModule) {
-      console.warn(`[AAR] Unsupported task_type="${taskType}"`);
-      _renderWaiting('Unsupported drill type');
+      if (taskType === 'COMPOSITE') {
+        _renderWaiting('Round and component data appear above');
+      } else {
+        console.warn(`[AAR] Unsupported task_type="${taskType}"`);
+        _renderWaiting('Unsupported drill type');
+      }
       return;
     }
 
     if (_container && _activeModule && _activeModule.mount) {
       _activeModule.mount(_container);
     }
+  }
+
+  function onContextUpdated(payload) {
+    _activeModule?.onContextUpdated?.(payload);
   }
 
   function _renderWaiting(label = 'Waiting for a supported drill') {
@@ -164,6 +173,7 @@ LabReview.AAR.Dashboard = (function () {
     onMetricsReady,
     onSensorUpdate,
     onScenarioStopped,
+    onContextUpdated,
     onTrialUpdate,
     onWeaponInfo,
   };

@@ -8,7 +8,6 @@
  * Manages:
  *   - Nav item activation (highlight active item)
  *   - Page container show/hide
- *   - Event bar visibility (shown only for replay page)
  *   - TopBarManager activation
  *   - EventBus 'page-changed' broadcast
  */
@@ -19,9 +18,6 @@ LabReview.Sidebar = (function () {
 
   // Default page on load
   let _activePage = 'live-intel';
-
-  // Pages that show the event bar (VirTra + Speech) at the bottom
-  const PAGES_WITH_EVENT_BAR = new Set(['live-intel']);
 
   function init() {
     // Bind nav item clicks
@@ -41,7 +37,7 @@ LabReview.Sidebar = (function () {
 
   /**
    * Switch to a named page.
-   * Handles: nav highlight, page visibility, event bar, TopBarManager.
+   * Handles: nav highlight, page visibility, TopBarManager.
    */
   function switchPage(page) {
     _activePage = page;
@@ -57,21 +53,6 @@ LabReview.Sidebar = (function () {
     document.querySelectorAll('.page').forEach(el => {
       el.classList.toggle('active', el.id === `page-${page}`);
     });
-
-    // ── Event bar visibility ───────────────────────────────────
-    const app = document.getElementById('app');
-    if (app) {
-      const show = PAGES_WITH_EVENT_BAR.has(page);
-      app.classList.toggle('event-bar-hidden', !show);
-
-      if (!show) {
-        app.style.setProperty('--event-bar-h', '0px');
-      } else {
-        const stored = parseInt(localStorage.getItem('labReplay.eventBarHeight'), 10);
-        const h = stored && stored >= 80 ? stored : 150;
-        app.style.setProperty('--event-bar-h', `${h}px`);
-      }
-    }
 
     // ── Top bar slot ───────────────────────────────────────────
     if (LabReview.TopBarManager) {

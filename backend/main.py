@@ -76,7 +76,7 @@ def _start_frontend_server(port: int) -> bool:
         def log_message(self, fmt, *args):  # silence per-request logs
             pass
 
-    httpd = http.server.ThreadingHTTPServer(("localhost", port), _Handler)
+    httpd = http.server.ThreadingHTTPServer(("0.0.0.0", port), _Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True, name="FrontendHTTP")
     thread.start()
     print(f"[FrontendServer] Serving {frontend_dir} on http://localhost:{port}")

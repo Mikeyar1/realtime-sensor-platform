@@ -45,7 +45,7 @@ class LslInletWorkerThread(threading.Thread):
         rate = self.meta.get("sample_rate", 0)
         ch = self.meta.get("channel_count", "?")
         rate_str = f"{rate:.0f} Hz" if rate else "irregular"
-        print(f"[LslInletWorkerThread] ▶ Started  {self.name_str!r:40s}  type={self.type_str}  ch={ch}  {rate_str}")
+        print(f"[LslInletWorkerThread] Started  {self.name_str!r:40s}  type={self.type_str}  ch={ch}  {rate_str}")
         while not self._stop_event.is_set():
             try:
                 sample, timestamp = self._inlet.pull_sample(timeout=self._pull_timeout)

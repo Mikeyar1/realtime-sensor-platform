@@ -46,6 +46,7 @@ a = Analysis(
 
         # Drill/scenario registry (editable — no rebuild needed when adding scenarios)
         (str(PROJECT_ROOT / "config" / "drill_registry.toml"), "config"),
+        (str(PROJECT_ROOT / "config" / "virtra_streams.toml"), "config"),
 
         # Frontend — served by the embedded HTTP server at runtime
         (str(PROJECT_ROOT / "frontend"),                 "frontend"),

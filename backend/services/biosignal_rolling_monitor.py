@@ -54,9 +54,11 @@ class BiosignalRollingMonitor:
         self._ppi_session: list     = []   # all PPI intervals (for RMSSD)
         self._pupil_l_session: list = []
         self._pupil_r_session: list = []
+        self._record_session = True
 
-    def reset(self):
+    def reset(self, record_session: bool = True):
         """Clear all rolling buffers AND session accumulators for a new scenario."""
+        self._record_session = record_session
         self._hr_buf.clear()
         self._ppi_buf.clear()
         self._pupil_l_buf.clear()
@@ -72,7 +74,8 @@ class BiosignalRollingMonitor:
             bpm = float(data[0])
             if 30 < bpm < 250:  # physiological sanity filter
                 self._hr_buf.append(bpm)
-                self._hr_session.append(bpm)        # session accumulator
+                if self._record_session:
+                    self._hr_session.append(bpm)
                 self.broadcast_biosignal(timestamp)
         except (IndexError, ValueError, TypeError):
             pass
@@ -89,7 +92,8 @@ class BiosignalRollingMonitor:
             ppi_ms = float(data[1])
             if 200 < ppi_ms < 2500:  # sanity: 24–300 BPM range
                 self._ppi_buf.append(ppi_ms)
-                self._ppi_session.append(ppi_ms)    # session accumulator
+                if self._record_session:
+                    self._ppi_session.append(ppi_ms)
                 self.broadcast_biosignal(timestamp)
         except (IndexError, ValueError, TypeError):
             pass
@@ -105,10 +109,12 @@ class BiosignalRollingMonitor:
             pr = float(data[GAZE_IDX_PUPIL_RIGHT])
             if pl > 0:
                 self._pupil_l_buf.append(pl)
-                self._pupil_l_session.append(pl)    # session accumulator
+                if self._record_session:
+                    self._pupil_l_session.append(pl)
             if pr > 0:
                 self._pupil_r_buf.append(pr)
-                self._pupil_r_session.append(pr)    # session accumulator
+                if self._record_session:
+                    self._pupil_r_session.append(pr)
             # Broadcast every 20 gaze samples (200Hz → ~10 Hz update rate)
             if len(self._pupil_l_buf) % 20 == 0:
                 self.broadcast_biosignal(timestamp)
@@ -182,9 +188,13 @@ class BiosignalRollingMonitor:
         if self._pupil_l_session and self._pupil_r_session:
             l_vals = self._pupil_l_session
             r_vals = self._pupil_r_session
-            snap["pupil_l_mean_mm"] = round(sum(l_vals) / len(l_vals), 3)
-            snap["pupil_r_mean_mm"] = round(sum(r_vals) / len(r_vals), 3)
+            left_mean = sum(l_vals) / len(l_vals)
+            right_mean = sum(r_vals) / len(r_vals)
+            snap["pupil_l_mean_mm"] = round(left_mean, 3)
+            snap["pupil_r_mean_mm"] = round(right_mean, 3)
+            snap["pupil_mean_mm"]   = round((left_mean + right_mean) / 2, 3)
             snap["pupil_l_n"]       = len(l_vals)
             snap["pupil_r_n"]       = len(r_vals)
+            snap["pupil_n"]         = min(len(l_vals), len(r_vals))
 
         return snap

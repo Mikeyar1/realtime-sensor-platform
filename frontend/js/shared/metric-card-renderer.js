@@ -83,14 +83,18 @@ LabReview.MetricCardRenderer = (function () {
     }
 
     if (rawValue == null) return;
-    valueEl.textContent = _formatValue(rawValue, def.format);
+    const nextValue = _formatValue(rawValue, def.format);
+    if (valueEl.textContent === nextValue) return;
+    valueEl.textContent = nextValue;
 
-    // Flash animation on value change (only when not frozen)
+    // Highlight the card surface only while live; keep its content visible.
     if (!_frozen) {
-      valueEl.classList.remove('metric-card__value--flash');
-      // Trigger reflow to restart animation
-      void valueEl.offsetWidth;
-      valueEl.classList.add('metric-card__value--flash');
+      const cardEl = valueEl.closest('.metric-card');
+      if (cardEl) {
+        cardEl.classList.remove('metric-card--flash');
+        void cardEl.offsetWidth;
+        cardEl.classList.add('metric-card--flash');
+      }
     }
   }
 

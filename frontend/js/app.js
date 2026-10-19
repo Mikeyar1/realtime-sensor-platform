@@ -24,52 +24,6 @@ LabReview.Shared = {
   formatDuration,
 };
 
-// ── Event bar drag-resize ──────────────────────────────────────────────────
-function wireEventBarResize() {
-  const app    = document.getElementById('app');
-  const bar    = document.getElementById('event-bar');
-  const handle = document.getElementById('event-bar-handle');
-  if (!app || !bar || !handle) return;
-
-  const MIN_H = 80;
-  const MAX_H = () => Math.floor(window.innerHeight * 0.6);
-  const STORAGE_KEY = 'labReplay.eventBarHeight';
-
-  function applyHeight(h) {
-    h = Math.min(MAX_H(), Math.max(MIN_H, h));
-    app.style.setProperty('--event-bar-h', `${h}px`);
-  }
-
-  const saved = parseInt(localStorage.getItem(STORAGE_KEY), 10);
-  applyHeight(saved && saved >= MIN_H ? saved : 150);
-
-  let startY = 0;
-  let startH = 0;
-
-  handle.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    startY = e.clientY;
-    startH = bar.getBoundingClientRect().height;
-    handle.classList.add('dragging');
-    document.body.style.cursor = 'ns-resize';
-    document.body.style.userSelect = 'none';
-  });
-
-  document.addEventListener('mousemove', (e) => {
-    if (!handle.classList.contains('dragging')) return;
-    const dy = e.clientY - startY;
-    applyHeight(startH - dy);
-  });
-
-  document.addEventListener('mouseup', () => {
-    if (!handle.classList.contains('dragging')) return;
-    handle.classList.remove('dragging');
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-    localStorage.setItem(STORAGE_KEY, bar.getBoundingClientRect().height);
-  });
-}
-
 // ── Initialize ─────────────────────────────────────────────────────────────
 function init() {
   console.log('[App] LabReview initializing…');
@@ -78,21 +32,14 @@ function init() {
   // 1. TopBarManager — must come before Sidebar
   LabReview.TopBarManager.init(document.getElementById('topbar-slot'));
 
-  // 2. Core modules
-  LabReview.Timeline.init();
-  LabReview.EventTicker.init();
-
-  // 3. Page controllers
+  // 2. Page controllers
   if (LabReview.LiveIntelPage)  LabReview.LiveIntelPage.init();
   if (LabReview.PerfReviewPage) LabReview.PerfReviewPage.init();
 
-  // 4. Sidebar — switches to default page (live-intel)
+  // 3. Sidebar — switches to default page (live-intel)
   LabReview.Sidebar.init();
 
-  // 5. Event bar resize handle
-  wireEventBarResize();
-
-  // 6. Connect to WebSocket backend
+  // 4. Connect to WebSocket backend
   LabReview.StreamRouter.connect();
 }
 

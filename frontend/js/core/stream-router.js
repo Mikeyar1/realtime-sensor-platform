@@ -124,10 +124,46 @@ LabReview.StreamRouter = (function () {
         LabReview.EventBus.emit('scenario-stopped', msg);
         break;
 
+      case 'session.context_updated':
+        LabReview.EventBus.emit('scenario-context-updated', msg);
+        break;
+
+      case 'session.scoring_waiting':
+        LabReview.EventBus.emit('scoring-waiting', msg);
+        break;
+
+      case 'session.scoring_unavailable':
+        LabReview.EventBus.emit('scoring-unavailable', msg);
+        break;
+
       // ── Individual VirTra events (Shot Fired, Shot Hit, Target Activated…) ──
       // Backend broadcasts these for real-time metric computation in drill displays.
       case 'session.virtra_event':
         LabReview.EventBus.emit('virtra-event', msg);
+        break;
+
+      case 'session.custom_lsl_event':
+        LabReview.EventBus.emit('custom-lsl-event', msg);
+        break;
+
+      case 'assessment.round_updated':
+        LabReview.EventBus.emit('assessment-round-updated', msg);
+        break;
+
+      case 'assessment.round_physiology':
+        LabReview.EventBus.emit('assessment-round-physiology', msg);
+        break;
+
+      case 'assessment.round_projection':
+        LabReview.EventBus.emit('assessment-round-projection', msg);
+        break;
+
+      case 'assessment.command_result':
+        LabReview.EventBus.emit('assessment-command-result', msg);
+        break;
+
+      case 'perf.session_detail_result':
+        LabReview.EventBus.emit('perf-session-detail-result', msg);
         break;
 
       // ── Live biosignal stats (HR, HRV, pupil) ──────────────────────────────
@@ -271,7 +307,7 @@ LabReview.StreamRouter = (function () {
     subscribe(catalog.map(s => s.name || s.id));
   }
 
-  function activateLive()   { _send({ type: 'live.activate' }); }
+  function activateLive() { _send({ type: 'live.activate' }); }
   function deactivateLive() { _send({ type: 'live.deactivate' }); }
 
   function getCatalog() { return catalog; }

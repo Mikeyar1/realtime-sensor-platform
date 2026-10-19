@@ -19,18 +19,32 @@ LabReview.PerfReviewPage = (function () {
 
   let _allSessions    = [];  // all sessions returned for current participant
   let _activeIdx      = -1;
+  let _filteredSessions = [];
+  let _selectedSessionUuid = '';
+  let _chartScrollPosition = 0;
   let _debounceTimer  = null;
   let _pendingDelete = false;
+  let _chartRedrawRAF = null;
 
   // DOM refs
-  let _participantInput, _scenarioSelect, _depthInput;
+  let _participantInput, _scenarioSelect, _presetSelect, _depthInput;
   let _tableWrap, _tableBody, _tableCount;
   let _chartScroll, _chartBreadcrumb;
   let _filterRow;  // the scenario + depth row (hidden until sessions loaded)
+  let _selectedRoundKey = '';
+  let _historyQueryName = '';
+  let _historyRequestId = '';
+  let _legacyHistory = null;
+  let _assessmentHistory = null;
+  let _selectedAssessmentRoundId = '';
 
   // ---- Metric definitions per drill_key ---------------------------------------
 
   const METRIC_DEFS = {
+    pvt_fitts: [
+      { field: 'completed_rounds', label: 'Completed Rounds', unit: '', lowerBetter: false },
+      { field: 'duration_s', label: 'Session Duration', unit: 's', lowerBetter: false },
+    ],
     pvt: [
       { field: 'total_trials', label: 'Total Trials', unit: '', lowerBetter: false },
       { field: 'duration_s', label: 'Session Duration', unit: 's', lowerBetter: false },
@@ -70,17 +84,27 @@ LabReview.PerfReviewPage = (function () {
       { field: 'discrimination.threat_rt_mean_ms', label: 'Mean Threat RT', unit: 'ms', lowerBetter: true },
       { field: 'discrimination.threat_rt_stdev_ms', label: 'Threat RT Std Dev', unit: 'ms', lowerBetter: true },
       { field: 'pvt.total_trials', label: 'PVT Trials', unit: '', lowerBetter: false },
+      { field: 'pvt.duration_s', label: 'PVT Duration', unit: 's', lowerBetter: false },
       { field: 'pvt.hits_pct', label: 'PVT Hits', unit: '%', lowerBetter: false },
       { field: 'pvt.omissions', label: 'PVT Omissions', unit: '', lowerBetter: true },
+      { field: 'pvt.response_rate_pct', label: 'PVT Response Rate', unit: '%', lowerBetter: false },
+      { field: 'pvt.omission_rate_pct', label: 'PVT Omission Rate', unit: '%', lowerBetter: true },
       { field: 'pvt.rt_median_ms', label: 'PVT Median RT', unit: 'ms', lowerBetter: true },
+      { field: 'pvt.rt_mean_ms', label: 'PVT Mean RT', unit: 'ms', lowerBetter: true },
+      { field: 'pvt.rt_stdev_ms', label: 'PVT RT Std Dev', unit: 'ms', lowerBetter: true },
+      { field: 'pvt.rt_min_ms', label: 'PVT Minimum RT', unit: 'ms', lowerBetter: true },
+      { field: 'pvt.rt_max_ms', label: 'PVT Maximum RT', unit: 'ms', lowerBetter: true },
     ],
   };
+  METRIC_DEFS.fitts_pvt_clay = LabReview.AAR.Standardized.specs.PVT_FITTS.groups
+    .flatMap(([, cards]) => cards.filter(card => card.scope !== 'run'))
+    .map(card => ({ field: card.path, label: card.label, unit: card.unit,
+      lowerBetter: ['rt_', 'omission', 'miss', 'shot_miss'].some(prefix => card.path.startsWith(prefix)) }));
 
   const BIOSIGNAL_DEFS = [
-    { field: 'hr_mean_bpm',     label: 'Heart Rate',   unit: 'bpm', lowerBetter: false },
-    { field: 'hrv_rmssd_ms',    label: 'HRV (RMSSD)',  unit: 'ms',  lowerBetter: false },
-    { field: 'pupil_l_mean_mm', label: 'Pupil Left',   unit: 'mm',  lowerBetter: false },
-    { field: 'pupil_r_mean_mm', label: 'Pupil Right',  unit: 'mm',  lowerBetter: false },
+    { field: 'hr_mean_bpm',  label: 'Average Heart Rate', unit: 'bpm' },
+    { field: 'hrv_rmssd_ms', label: 'HRV (RMSSD)',        unit: 'ms' },
+    { field: 'pupil_mean_mm', label: 'Average Pupil Diameter', unit: 'mm' },
   ];
 
   // ---- Init -------------------------------------------------------------------
@@ -91,14 +115,20 @@ LabReview.PerfReviewPage = (function () {
     }
     LabReview.EventBus.on('db-participants-list', _onParticipantsList);
     LabReview.EventBus.on('perf-result', _onPerfResult);
+    LabReview.EventBus.on('assessment-command-result', _onAssessmentHistoryResult);
+    LabReview.EventBus.on('perf-session-detail-result', _onSessionDetail);
     LabReview.EventBus.on('perf-delete-result', _onDeleteResult);
     LabReview.EventBus.on('page-changed', function (page) {
-      if (page === 'perf-review') _renderPageContent();
+      if (page === 'perf-review') {
+        _renderPageContent();
+        _scheduleChartRedraw();
+      }
     });
+    window.addEventListener('resize', _scheduleChartRedraw);
   }
 
   function _renderTopBar(container) {
-    container.innerHTML = '<div class="topbar" id="perf-review-topbar"><span class="topbar-title">Session History</span></div>';
+    container.innerHTML = '<div class="topbar" id="perf-review-topbar"><span class="pr-topbar-title">Longitudinal Data</span></div>';
   }
 
   // ---- Page shell -------------------------------------------------------------
@@ -141,6 +171,10 @@ LabReview.PerfReviewPage = (function () {
           <select id="pr-scenario" class="pr-select">
             <option value="">Select a scenario</option>
           </select>
+        </div>
+        <div class="pr-form-group" style="margin-bottom:var(--space-md)">
+          <label class="pr-form-label" for="pr-preset">Preset</label>
+          <select id="pr-preset" class="pr-select"><option value="">All presets</option></select>
         </div>
         <div class="pr-form-group">
           <label class="pr-form-label" for="pr-depth">Last N Sessions</label>
@@ -201,6 +235,7 @@ LabReview.PerfReviewPage = (function () {
     // Cache refs
     _participantInput = document.getElementById('pr-participant');
     _scenarioSelect   = document.getElementById('pr-scenario');
+    _presetSelect     = document.getElementById('pr-preset');
     _depthInput       = document.getElementById('pr-depth');
     _filterRow        = document.getElementById('pr-filter-row');
     _tableWrap        = document.getElementById('pr-table-wrap');
@@ -224,7 +259,8 @@ LabReview.PerfReviewPage = (function () {
     });
 
     // Scenario + depth — filter client-side, no server round-trip
-    _scenarioSelect.addEventListener('change', _applyFilters);
+    _scenarioSelect.addEventListener('change', () => { _populatePresetFilter(); _applyFilters(); });
+    _presetSelect.addEventListener('change', _applyFilters);
     _depthInput.addEventListener('input', function () {
       clearTimeout(_debounceTimer);
       _debounceTimer = setTimeout(_applyFilters, 350);
@@ -255,8 +291,15 @@ LabReview.PerfReviewPage = (function () {
       }
       return;
     }
-    // Always fetch ALL sessions; filter client-side
-    LabReview.StreamRouter.send({ type: 'perf.query', participant_name: name });
+    _historyQueryName = name;
+    _historyRequestId = `history-${Date.now()}-${Math.random()}`;
+    _legacyHistory = null;
+    _assessmentHistory = null;
+    // The old session store and new round store remain independent during migration.
+    LabReview.StreamRouter.send({ type: 'perf.query', participant_name: name,
+      request_id: _historyRequestId });
+    LabReview.StreamRouter.send({ type: 'history.rounds.query', participant_name: name,
+      request_id: _historyRequestId, limit: 1000 });
   }
 
   // ---- Receive results --------------------------------------------------------
@@ -269,9 +312,49 @@ LabReview.PerfReviewPage = (function () {
   }
 
   function _onPerfResult(msg) {
-    if (msg.participant_name !== (_participantInput.value || '').trim()) return;
-    _allSessions = msg.sessions || [];
+    if (msg.participant_name !== (_participantInput.value || '').trim() ||
+        msg.request_id !== _historyRequestId) return;
+    _legacyHistory = msg.sessions || [];
+    _commitHistoryQuery();
+  }
+
+  function _onAssessmentHistoryResult(msg) {
+    if (msg.command === 'history.round.get') {
+      if (msg.round_id !== _selectedAssessmentRoundId) return;
+      if (msg.success && msg.result?.id === _selectedAssessmentRoundId) {
+        _renderAssessmentRoundDetail(msg.result);
+      } else if (_chartScroll) {
+        _chartScroll.innerHTML = '<div class="pr-chart-empty">Round detail is unavailable.</div>';
+      }
+      return;
+    }
+    if (msg.command !== 'history.rounds.query' || msg.request_id !== _historyRequestId) return;
+    _assessmentHistory = msg.success ? (msg.result || []).map(row => ({
+      result_scope: 'round', round_id: row.id, session_uuid: row.run_id,
+      round_number: row.round_number, round_attempt: row.attempt,
+      scenario_name: row.scenario_name, drill_key: row.drill_key,
+      source: 'custom',
+      started_at: row.started_at, stopped_at: row.ended_at,
+      saved_at: row.performed_at,
+      preset_label: row.preset_label, preset_mixed: row.preset_mixed,
+      metrics: row.metrics || {}, biosignals: row.physiology || {},
+      capture_status: row.status,
+    })) : [];
+    if (!msg.success) _setActionStatus(msg.error || 'Round history could not be loaded.', true);
+    _commitHistoryQuery();
+  }
+
+  function _commitHistoryQuery() {
+    if (_legacyHistory === null || _assessmentHistory === null ||
+        _historyQueryName !== (_participantInput?.value || '').trim()) return;
+    _allSessions = [..._legacyHistory, ..._assessmentHistory].sort((a, b) =>
+      (Date.parse(a.saved_at || a.date || '') || 0) -
+      (Date.parse(b.saved_at || b.date || '') || 0));
     _activeIdx   = -1;
+    const deleteParticipantButton = document.getElementById('pr-delete-participant');
+    if (deleteParticipantButton) {
+      deleteParticipantButton.style.display = _allSessions.some(row => row.result_scope === 'round') ? 'none' : '';
+    }
 
     const hasResults = _allSessions.length > 0;
     const promptEl   = document.getElementById('pr-prompt');
@@ -284,13 +367,14 @@ LabReview.PerfReviewPage = (function () {
 
       // Populate scenario dropdown with unique names from returned sessions
       _populateScenarioFilter(_allSessions);
+      _populatePresetFilter();
     } else {
       if (_filterRow)  _filterRow.style.display  = 'none';
       if (_tableWrap)  _tableWrap.style.display  = 'none';
       if (promptEl) {
         promptEl.style.display = '';
-        promptEl.textContent   = msg.participant_name
-          ? 'No sessions found for "' + msg.participant_name + '".'
+        promptEl.textContent   = _historyQueryName
+          ? 'No sessions found for "' + _historyQueryName + '".'
           : 'Enter a participant name above to load session history.';
       }
     }
@@ -307,21 +391,45 @@ LabReview.PerfReviewPage = (function () {
     if (!_scenarioSelect) return;
     const current = _scenarioSelect.value;
 
-    // A scenario and drill type form one comparable performance series.
+    // Keep scoring sources separate when the same scenario name was reused.
     const seen = new Set();
     const choices = [];
     sessions.forEach(function (s) {
       const key = _scenarioKey(s);
-      if (!seen.has(key)) { seen.add(key); choices.push({ key, name: s.scenario_name || 'Unnamed scenario' }); }
+      if (!seen.has(key)) {
+        seen.add(key);
+        choices.push({ key, name: (s.scenario_name || 'Unnamed scenario') +
+          (s.scenario_name === 'Fitts-PVT_Clay' ?
+            ` · ${(s.metrics_source || s.source) === 'custom' ? 'Custom' : 'Native'}` : '') });
+      }
     });
     _scenarioSelect.innerHTML = choices.map(function (choice) {
-        return '<option value="' + _esc(choice.key) + '">' + _esc(choice.name) + '</option>';
+        return '<option value="' + _esc(choice.key) + '">' +
+          _esc(choice.name) + '</option>';
       }).join('');
     _scenarioSelect.value = seen.has(current) ? current : choices[choices.length - 1].key;
   }
 
   function _scenarioKey(session) {
-    return JSON.stringify([session.drill_key || '', session.scenario_name || '']);
+    return [session.scenario_name || '', session.drill_key || '',
+      session.metrics_source || session.source || 'native'].join('|');
+  }
+
+  function _populatePresetFilter() {
+    if (!_presetSelect) return;
+    const previous = _presetSelect.value;
+    const rows = _allSessions.filter(row => _scenarioKey(row) === _scenarioSelect.value);
+    const labels = [...new Set(rows.filter(row => row.result_scope === 'round')
+      .map(row => row.preset_mixed ? '__mixed__' : row.preset_label || '__unreported__'))].sort();
+    _presetSelect.innerHTML = '<option value="">All presets</option>' +
+      labels.map(label => `<option value="${_esc(label)}">${_esc(label === '__mixed__'
+        ? 'Mixed presets' : label === '__unreported__' ? 'Not reported' : label)}</option>`).join('');
+    _presetSelect.value = labels.includes(previous) ? previous : '';
+    _presetSelect.disabled = labels.length === 0;
+  }
+
+  function _drillDisplayName(drillKey) {
+    return { pvt: 'PVT', pvt_fitts: 'PVT / Fitts', gng: 'Go/No-Go', behavioral_discrimination: 'Behavioral Discrimination' }[drillKey] || drillKey || 'Unknown drill';
   }
 
   // ---- Client-side filtering --------------------------------------------------
@@ -339,12 +447,20 @@ LabReview.PerfReviewPage = (function () {
 
     // Filter by scenario
     let filtered = _allSessions.filter(function (s) { return _scenarioKey(s) === scenario; });
+    if (_presetSelect?.value) {
+      filtered = filtered.filter(s => s.result_scope === 'round' &&
+        (s.preset_mixed ? '__mixed__' : s.preset_label || '__unreported__') === _presetSelect.value);
+    }
 
     // Apply depth (most recent N — sessions come back oldest-first, so take tail)
     if (depth > 0 && filtered.length > depth) {
       filtered = filtered.slice(filtered.length - depth);
     }
 
+    _filteredSessions = filtered;
+    _selectedSessionUuid = '';
+    _selectedRoundKey = '';
+    _selectedAssessmentRoundId = '';
     _renderTable(filtered);
     _renderCharts(filtered);
   }
@@ -364,20 +480,23 @@ LabReview.PerfReviewPage = (function () {
       return;
     }
     if (emptyEl) emptyEl.style.display = 'none';
-    if (_tableCount) _tableCount.textContent = sessions.length + ' session' + (sessions.length !== 1 ? 's' : '');
+    if (_tableCount) _tableCount.textContent = sessions.length + ' result' + (sessions.length !== 1 ? 's' : '');
 
     _tableBody.innerHTML = sessions.map(function (s, idx) {
       const date = _sessionDateTime(s);
-      const scenario = s.scenario_name || 'Unnamed scenario';
-      const dur = _formatDur(_readMetric(s.metrics || {}, 'duration_s'));
+      const scenario = (s.scenario_name || 'Unnamed scenario') +
+        (s.result_scope === 'round' ? ` · Round ${s.round_number}${s.round_attempt > 1 ? ` attempt ${s.round_attempt}` : ''}` : '');
+      const dur = _formatDur(_readMetric(s.metrics || {},
+        s.round_id ? 'round_duration_s' : 'duration_s'));
       const metric = _headlineMetric(s);
       return '<div class="pr-session-row" data-idx="' + idx + '">' +
         '<button type="button" class="pr-session-select" data-select-idx="' + idx + '" aria-label="Select ' + _esc(scenario) + ' session from ' + _esc(date) + '">' +
         '<strong class="pr-session-row__name">' + _esc(scenario) + '</strong>' +
-        '<span class="pr-session-row__date">' + _esc(date) + '</span>' +
+        '<span class="pr-session-row__date">' + _esc(date) +
+        (s.result_scope === 'round' ? ' · Preset: ' + _esc(s.preset_mixed ? 'Mixed' : s.preset_label || 'Not reported') : '') + '</span>' +
         '<span class="pr-session-row__stats"><span>Duration <strong>' + _esc(dur) + '</strong></span>' +
         '<span>' + _esc(_headlineLabel(s)) + ' <strong>' + _esc(metric) + '</strong></span></span></button>' +
-        '<button type="button" class="pr-delete-session" data-delete-idx="' + idx + '" aria-label="Delete ' + _esc(scenario) + ' session from ' + _esc(date) + '">Delete</button></div>';
+        (s.result_scope === 'round' ? '' : '<button type="button" class="pr-delete-session" data-delete-idx="' + idx + '" aria-label="Delete ' + _esc(scenario) + ' session from ' + _esc(date) + '">Delete</button>') + '</div>';
     }).join('');
 
     _tableBody.querySelectorAll('.pr-session-select').forEach(function (button) {
@@ -400,6 +519,124 @@ LabReview.PerfReviewPage = (function () {
       });
     }
     _updateChartMarkers(idx);
+    const session = _filteredSessions[idx];
+    if (!session) return;
+    _selectedSessionUuid = session.session_uuid;
+    _selectedAssessmentRoundId = session.round_id || '';
+    _selectedRoundKey = session.result_scope === 'round'
+      ? `${session.round_number}:${session.round_attempt || 1}` : '';
+    _chartScrollPosition = _chartScroll.scrollTop;
+    _chartScroll.innerHTML = '<div class="pr-chart-empty">Loading session detail…</div>';
+    if (session.round_id) {
+      LabReview.StreamRouter.send({ type: 'history.round.get', round_id: session.round_id,
+        participant_name: (_participantInput.value || '').trim() });
+      return;
+    }
+    LabReview.StreamRouter.send({
+      type: 'perf.session_detail',
+      session_uuid: session.session_uuid,
+      participant_name: (_participantInput.value || '').trim(),
+      ...(session.result_scope === 'round' ? {
+        round_number: session.round_number, round_attempt: session.round_attempt || 1,
+      } : {}),
+    });
+  }
+
+  function _onSessionDetail(message) {
+    if (_selectedAssessmentRoundId) return;
+    if (message.session_uuid !== _selectedSessionUuid || !_chartScroll) return;
+    if (`${message.round_number ?? ''}:${message.round_attempt ?? ''}` !==
+        (_selectedRoundKey || ':')) return;
+    const session = message.session;
+    if (!session) {
+      _chartScroll.innerHTML = '<div class="pr-chart-empty">Session detail is unavailable.</div>';
+      return;
+    }
+    const definitions = METRIC_DEFS[session.drill_key] || [];
+    const metricCards = definitions.length
+      ? definitions.map(def => _detailCard(def.label, _readMetric(session.metrics || {}, def.field), def.unit)).join('')
+      : Object.entries(session.metrics || {}).filter(([, value]) => value != null && typeof value !== 'object')
+          .map(([key, value]) => _detailCard(key.replace(/_/g, ' '), value, '')).join('');
+    const bioCards = BIOSIGNAL_DEFS.map(def =>
+      _detailCard(def.label, _readMetric(session.biosignals || {}, def.field), def.unit)).join('');
+    const nativeContext = session.native_context || {};
+    const contextCards = [
+      ['Simulator', nativeContext.simulator],
+      ['Simulator System', nativeContext.simulator_system],
+      ['Weapon Type', nativeContext.weapon_type],
+    ].filter(([, value]) => value).map(([label, value]) => _detailCard(label, value, '')).join('');
+    const roundCards = (session.rounds || []).map(round => {
+      const settings = round.settings || {};
+      const difficultyFields = [
+        ['Distance', 'active_distance_meters', 'm'],
+        ['Visibility', 'active_visibility_duration_seconds', 's'],
+        ['Spawn interval', 'active_spawn_interval_seconds', 's'],
+        ['Targets', 'active_targets_per_round', ''],
+        ['Concurrent', 'active_concurrent_targets', ''],
+      ];
+      const difficulty = session.drill_key === 'fitts_pvt_clay'
+        ? difficultyFields.filter(([, key]) => settings[key] != null)
+          .map(([label, key, unit]) => `${label}: ${settings[key]}${unit}`).join(' · ')
+        : '';
+      const components = Object.entries(round.components || {}).map(([name, detail]) => {
+        const cards = session.drill_key === 'fitts_pvt_clay'
+          ? METRIC_DEFS.pvt.filter(def => _readMetric(detail.metrics || {}, def.field) != null)
+            .map(def => _detailCard(def.label, _readMetric(detail.metrics, def.field), def.unit))
+          : Object.entries(detail.metrics || {})
+            .filter(([, value]) => value != null && typeof value !== 'object')
+            .map(([key, value]) => _detailCard(key.replace(/_/g, ' '), value, ''));
+        return `<div class="pr-detail-component"><h4>${_esc(name.toUpperCase())}</h4><div class="pr-detail-grid">${cards.join('') || '<p>No scored metrics recorded.</p>'}</div></div>`;
+      }).join('');
+      const trials = (session.trials || []).filter(t => t.round_number === round.round_number &&
+        t.round_attempt === (round.attempt || 1));
+      return `<details class="pr-detail-round"><summary>Round ${_esc(round.round_number)}${round.attempt > 1 ? ` · Attempt ${round.attempt}` : ''} · ${_esc(round.ended_reason || 'incomplete')} · ${trials.length} trials</summary><p>Participant: ${_esc(round.participant_name || 'Unassigned')} · Preset: ${_esc(round.preset_mixed ? 'Mixed presets' : round.preset_label || 'Not reported')}</p>${difficulty ? `<p>Round settings: ${_esc(difficulty)}</p>` : ''}${components}</details>`;
+    }).join('');
+    _chartScroll.innerHTML = `<div class="pr-detail"><button type="button" class="pr-detail-back" id="pr-detail-back">← All session trends</button>
+      <h2>${_esc(session.scenario_name || 'Session')}</h2><p>${_esc(_sessionDateTime(session))} · ${_esc(session.capture_status || 'complete')} capture</p>
+      ${contextCards ? `<h3>VirTra context</h3><div class="pr-detail-grid">${contextCards}</div>` : ''}
+      <h3>Behavioral results</h3><div class="pr-detail-grid">${metricCards || '<p>No scored metrics available.</p>'}</div>
+      <h3>Physiological data</h3><div class="pr-detail-grid">${bioCards}</div>
+      ${roundCards ? `<h3>Rounds</h3>${roundCards}` : ''}</div>`;
+    _chartScroll.scrollTop = 0;
+    _chartScroll.querySelector('#pr-detail-back')?.addEventListener('click', () => {
+      _selectedSessionUuid = '';
+      _selectedRoundKey = '';
+      _activeIdx = -1;
+      _renderCharts(_filteredSessions);
+      _chartScroll.scrollTop = _chartScrollPosition;
+      _tableBody?.querySelectorAll('.pr-row--active').forEach(row => row.classList.remove('pr-row--active'));
+    });
+  }
+
+  function _detailCard(label, value, unit) {
+    const shown = value == null || value === '' ? '—' : String(value) + (unit ? ' ' + unit : '');
+    return `<div class="pr-detail-card"><span>${_esc(label)}</span><strong>${_esc(shown)}</strong></div>`;
+  }
+
+  function _renderAssessmentRoundDetail(round) {
+    if (!_chartScroll || round.id !== _selectedAssessmentRoundId) return;
+    const metricCards = METRIC_DEFS[round.drill_key]?.map(def =>
+      _detailCard(def.label, round.metrics?.[def.field], def.unit)).join('') || '';
+    const bioCards = BIOSIGNAL_DEFS.map(def =>
+      _detailCard(def.label, round.physiology?.[def.field], def.unit)).join('');
+    const settings = Object.entries(round.settings || {}).map(([key, value]) =>
+      _detailCard(key.replace(/^active_/, '').replace(/_/g, ' '), value, '')).join('');
+    _chartScroll.innerHTML = `<div class="pr-detail">
+      <button type="button" class="pr-detail-back" id="pr-detail-back">← All round trends</button>
+      <h2>${_esc(round.scenario_name || 'Round')} · Round ${_esc(round.round_number)}</h2>
+      <p>Participant: ${_esc(round.participant_name || '')} · Preset: ${_esc(round.preset_label || 'Not reported')}</p>
+      <h3>Preset settings</h3><div class="pr-detail-grid">${settings}</div>
+      <h3>Behavioral results</h3><div class="pr-detail-grid">${metricCards}</div>
+      <h3>Physiological data</h3><div class="pr-detail-grid">${bioCards}</div>
+      <p>Physiology quality: ${_esc(round.quality?.physiology_status || 'unavailable')}</p></div>`;
+    _chartScroll.scrollTop = 0;
+    _chartScroll.querySelector('#pr-detail-back')?.addEventListener('click', () => {
+      _selectedAssessmentRoundId = '';
+      _selectedSessionUuid = '';
+      _activeIdx = -1;
+      _renderCharts(_filteredSessions);
+      _chartScroll.scrollTop = _chartScrollPosition;
+    });
   }
 
   function _deleteSession(session) {
@@ -463,7 +700,7 @@ LabReview.PerfReviewPage = (function () {
           '<span class="pr-breadcrumb-sep">/</span>' +
           '<span class="pr-breadcrumb-item">' + _esc(scenarioLabel) + '</span>' +
           '<span class="pr-breadcrumb-sep">/</span>' +
-          '<span class="pr-breadcrumb-item">' + sessions.length + ' session' + (sessions.length !== 1 ? 's' : '') + '</span>';
+          '<span class="pr-breadcrumb-item">' + sessions.length + ' result' + (sessions.length !== 1 ? 's' : '') + '</span>';
       } else {
         _chartBreadcrumb.innerHTML = '';
       }
@@ -477,36 +714,111 @@ LabReview.PerfReviewPage = (function () {
       return;
     }
 
-    const behavDefs = METRIC_DEFS[sessions[0].drill_key] || [];
+    const fittsRounds = sessions.filter(row => row.result_scope === 'round');
+    const presets = new Set(fittsRounds.map(row => row.preset_mixed ? '__mixed__' : row.preset_label || '__unknown__'));
+    if (fittsRounds.length && !_presetSelect?.value &&
+        (presets.size > 1 || presets.has('__unknown__') || presets.has('__mixed__'))) {
+      _chartScroll.innerHTML = '<div class="pr-chart-empty"><div class="pr-chart-empty__heading">Choose a preset for trends</div>' +
+        '<div class="pr-chart-empty__sub">Rounds from different or unreported presets are listed on the left. Select one preset to compare like with like.</div></div>';
+      return;
+    }
 
-    const cards = [];
+    const drillKeys = [...new Set(sessions.map(s => s.drill_key))];
+    const behavDefs = drillKeys.flatMap(drillKey => (METRIC_DEFS[drillKey] || []).map(def => ({
+      ...def, drillKey,
+      label: drillKeys.length > 1 ? `${_drillDisplayName(drillKey)} · ${def.label}` : def.label,
+    })));
+
+    const behavioralCards = [];
     behavDefs.forEach(function (def) {
       const values = sessions.map(function (s) {
+        if (s.drill_key !== def.drillKey) return null;
         const m = s.metrics || {};
+        if (s.round_id) {
+          const value = m[def.field];
+          return value == null || !Number.isFinite(Number(value)) ? null : Number(value);
+        }
         return _readMetric(m, def.field);
       });
-      if (values.some(function (v) { return v !== null; })) cards.push({ def, values, isBio: false });
-    });
-    BIOSIGNAL_DEFS.forEach(function (def) {
-      const values = sessions.map(function (s) {
-        const b = s.biosignals || {};
-        return b[def.field] == null ? null : Number(b[def.field]);
-      });
-      if (values.some(function (v) { return v !== null; })) cards.push({ def, values, isBio: true });
+      if (values.some(function (v) { return v !== null && isFinite(v); })) behavioralCards.push({ def, values, isBio: false });
     });
 
-    if (cards.length === 0) {
-      _chartScroll.innerHTML = '<div class="pr-chart-empty">' +
-        '<div class="pr-chart-empty__heading">No Metric Data</div>' +
-        '<div class="pr-chart-empty__sub">Sessions exist but contain no computed metrics yet.</div>' +
-        '</div>';
+    const physiologicalCards = [];
+    BIOSIGNAL_DEFS.forEach(function (def) {
+      const values = sessions.map(function (s) {
+        return _readBiosignal(s.biosignals || {}, def.field);
+      });
+      if (values.some(function (v) { return v !== null && isFinite(v); })) physiologicalCards.push({ def, values, isBio: true });
+    });
+
+    if (behavioralCards.length === 0 && physiologicalCards.length === 0) {
+      _chartScroll.innerHTML = fittsRounds.length
+        ? '<div class="pr-chart-empty"><div class="pr-chart-empty__heading">No comparable rounds</div>' +
+          '<div class="pr-chart-empty__sub">These rounds have unresolved shot attribution. Their metrics remain available in round detail.</div></div>'
+        : '<div class="pr-chart-empty"><div class="pr-chart-empty__heading">No Metric Data</div>' +
+          '<div class="pr-chart-empty__sub">Sessions exist but contain no computed metrics yet.</div></div>';
       return;
     }
 
     _chartScroll.innerHTML = '';
-    cards.forEach(function (card, cardIdx) {
-      const el = _buildMetricCard(card.def, card.values, sessions, card.isBio, cardIdx);
-      _chartScroll.appendChild(el);
+    let cardIdx = 0;
+    if (behavioralCards.length) {
+      cardIdx = _appendChartSection(
+        'Performance Metrics',
+        fittsRounds.length ? 'Rounds share the emitted preset label. Review round settings before interpreting change.' :
+          'Scenario-specific results across the selected sessions.',
+        behavioralCards,
+        sessions,
+        cardIdx
+      );
+    }
+    if (physiologicalCards.length) {
+      _appendChartSection(
+        'Physiological Data',
+        fittsRounds.length ? 'Physiological summaries captured within each round.' :
+          'Full-session physiological summaries captured during each scenario.',
+        physiologicalCards,
+        sessions,
+        cardIdx
+      );
+    } else {
+      const emptyPhysio = document.createElement('section');
+      emptyPhysio.className = 'pr-chart-section pr-chart-section--physio';
+      emptyPhysio.innerHTML =
+        '<div class="pr-chart-section__heading">' +
+          '<h2>Physiological Data</h2>' +
+          '<p>No physiological averages were recorded for these sessions.</p>' +
+        '</div>';
+      _chartScroll.appendChild(emptyPhysio);
+    }
+    _scheduleChartRedraw();
+  }
+
+  function _appendChartSection(title, subtitle, cards, sessions, startIdx) {
+    const section = document.createElement('section');
+    section.className = 'pr-chart-section' + (cards[0]?.isBio ? ' pr-chart-section--physio' : '');
+    section.innerHTML =
+      '<div class="pr-chart-section__heading">' +
+        '<h2>' + _esc(title) + '</h2>' +
+        '<p>' + _esc(subtitle) + '</p>' +
+      '</div>';
+    cards.forEach(function (card, offset) {
+      section.appendChild(_buildMetricCard(card.def, card.values, sessions, card.isBio, startIdx + offset));
+    });
+    _chartScroll.appendChild(section);
+    return startIdx + cards.length;
+  }
+
+  function _scheduleChartRedraw() {
+    if (_chartRedrawRAF !== null) return;
+    _chartRedrawRAF = requestAnimationFrame(function () {
+      _chartRedrawRAF = null;
+      if (!_chartScroll) return;
+      _chartScroll.querySelectorAll('.pr-metric-card').forEach(function (card) {
+        const svg = card.querySelector('.pr-sparkline');
+        if (svg) _drawSparkline(svg, card._chartValues, card._chartSessions, card._chartDef, card._chartIsBio);
+      });
+      _updateChartMarkers(_activeIdx);
     });
   }
 
@@ -516,6 +828,11 @@ LabReview.PerfReviewPage = (function () {
     const card = document.createElement('div');
     card.className = 'pr-metric-card';
     card.dataset.cardIdx = String(cardIdx);
+    card.tabIndex = 0;
+    card._chartValues = values;
+    card._chartSessions = sessions;
+    card._chartDef = def;
+    card._chartIsBio = isBio;
 
     const valid = values.filter(function (v) { return v !== null && isFinite(v); });
     const minV  = valid.length ? Math.min.apply(null, valid) : 0;
@@ -525,7 +842,7 @@ LabReview.PerfReviewPage = (function () {
 
     // Delta badge
     let deltaBadge = '';
-    if (firstV !== null && lastV !== null && firstV !== lastV) {
+    if (!isBio && firstV !== null && lastV !== null && firstV !== lastV) {
       const pct = ((lastV - firstV) / (Math.abs(firstV) || 1)) * 100;
       const isImp = def.lowerBetter ? pct < 0 : pct > 0;
       const cls   = Math.abs(pct) < 0.5 ? 'flat' : (isImp ? 'up' : 'down');
@@ -552,23 +869,21 @@ LabReview.PerfReviewPage = (function () {
         '</div>' +
       '</div>' +
       '<div class="pr-sparkline-wrap">' +
-        '<svg class="pr-sparkline" id="pr-sparkline-' + cardIdx + '" aria-label="' + _esc(def.label) + ' trend"></svg>' +
-      '</div>';
+        '<svg class="pr-sparkline" id="pr-sparkline-' + cardIdx + '" role="img" aria-label="' + _esc(def.label) + ' by session, oldest to newest"></svg>' +
+      '</div>' +
+      '<div class="pr-metric-card__selection" aria-live="polite">Select a session to see its value</div>' +
+      '<div class="pr-metric-card__tooltip" aria-hidden="true"></div>';
 
-    requestAnimationFrame(function () {
-      const svg = card.querySelector('.pr-sparkline');
-      if (svg) _drawSparkline(svg, values, sessions, def, cardIdx);
-    });
     return card;
   }
 
-  function _drawSparkline(svg, values, sessions, def, cardIdx) {
-    const W    = svg.getBoundingClientRect().width || 300;
-    const H    = 100;
-    const PADL = 38;
-    const PADR = 8;
-    const PADT = 10;
-    const PADB = 22;
+  function _drawSparkline(svg, values, sessions, def, isBio) {
+    const W    = Math.max(240, svg.getBoundingClientRect().width || 300);
+    const H    = 156;
+    const PADL = 52;
+    const PADR = 18;
+    const PADT = 16;
+    const PADB = 38;
     const plotW = W - PADL - PADR;
     const plotH = H - PADT - PADB;
 
@@ -577,10 +892,13 @@ LabReview.PerfReviewPage = (function () {
 
     const minV  = Math.min.apply(null, valid);
     const maxV  = Math.max.apply(null, valid);
-    const range = maxV - minV || 1;
+    const padding = (maxV - minV || Math.max(Math.abs(maxV), 1)) * 0.12;
+    const axisMin = Math.max(0, minV - padding);
+    const axisMax = maxV + padding;
+    const range = axisMax - axisMin;
     const n     = values.length;
 
-    function yPx(v) { return PADT + plotH - ((v - minV) / range) * plotH; }
+    function yPx(v) { return PADT + plotH - ((v - axisMin) / range) * plotH; }
     function xPx(i) { return PADL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW); }
 
     const NS = 'http://www.w3.org/2000/svg';
@@ -594,19 +912,30 @@ LabReview.PerfReviewPage = (function () {
     svg.innerHTML = '';
     svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
 
-    // Grid lines
+    // Grid and labeled value axis
     [0, 0.5, 1].forEach(function (t) {
       const y = PADT + plotH - t * plotH;
       el('line', { x1: PADL, y1: y, x2: W - PADR, y2: y, stroke: 'var(--chart-grid-color)', 'stroke-width': '1' }, svg);
-      el('text', { x: PADL - 3, y: y + 4, 'text-anchor': 'end', 'font-size': '9', fill: 'var(--text-dim)', 'font-family': 'var(--font-mono)' }, svg)
-        .textContent = _fmtVal(minV + t * range, '');
+      el('text', { x: PADL - 7, y: y + 4, 'text-anchor': 'end', 'font-size': '10', fill: 'var(--text-secondary)' }, svg)
+        .textContent = _fmtAxisTick(axisMin + t * range);
     });
 
-    // Y-axis baseline
-    el('line', { x1: PADL, y1: PADT, x2: PADL, y2: PADT + plotH, stroke: 'var(--chart-axis-color)', 'stroke-width': '1' }, svg);
+    // Both axes remain inside the SVG, including their labels.
+    el('line', { x1: PADL, y1: PADT, x2: PADL, y2: PADT + plotH, stroke: 'var(--chart-axis-color)', 'stroke-width': '1.2' }, svg);
+    el('line', { x1: PADL, y1: PADT + plotH, x2: W - PADR, y2: PADT + plotH, stroke: 'var(--chart-axis-color)', 'stroke-width': '1.2' }, svg);
+
+    const tickIndices = Array.from(new Set([0, Math.floor((n - 1) / 2), n - 1]));
+    tickIndices.forEach(function (i) {
+      const x = xPx(i);
+      el('line', { x1: x, y1: PADT + plotH, x2: x, y2: PADT + plotH + 5, stroke: 'var(--chart-axis-color)', 'stroke-width': '1' }, svg);
+      el('text', { x, y: H - 18, 'text-anchor': 'middle', 'font-size': '10', fill: 'var(--text-secondary)' }, svg)
+        .textContent = String(i + 1);
+    });
+    el('text', { x: PADL + plotW / 2, y: H - 3, 'text-anchor': 'middle', 'font-size': '10', fill: 'var(--text-muted)' }, svg)
+      .textContent = 'Session (oldest to newest)';
 
     // Polyline segments (handles null gaps)
-    const lineColor = 'var(--accent-blue)';
+    const lineColor = isBio ? 'var(--accent-teal)' : 'var(--accent-blue)';
     const segments = [];
     let cur = [];
     values.forEach(function (v, i) {
@@ -625,7 +954,7 @@ LabReview.PerfReviewPage = (function () {
       }
     });
 
-    // Dots + X labels (first + last)
+    // Session points. Their native titles also expose exact values.
     values.forEach(function (v, i) {
       if (v === null || !isFinite(v)) return;
       const cx = xPx(i).toFixed(1);
@@ -634,11 +963,6 @@ LabReview.PerfReviewPage = (function () {
         stroke: 'var(--bg-surface)', 'stroke-width': '1.5',
         'data-idx': i, class: 'pr-dot', style: 'cursor:pointer' }, svg);
       el('title', {}, dot).textContent = _sessionDateTime(sessions[i]) + ': ' + _fmtVal(v, def.unit);
-      if (i === 0 || i === n - 1) {
-        el('text', { x: cx, y: H - 4, 'text-anchor': i === 0 ? 'start' : 'end',
-          'font-size': '9', fill: 'var(--text-dim)', 'font-family': 'var(--font-family)' }, svg)
-          .textContent = _shortDate(sessions[i]);
-      }
     });
 
     // Marker line (vertical)
@@ -647,10 +971,10 @@ LabReview.PerfReviewPage = (function () {
       opacity: '0', 'data-marker': '1' }, svg);
 
     // Click on dots
-    svg.addEventListener('click', function (e) {
+    svg.onclick = function (e) {
       const dot = e.target.closest('.pr-dot');
       if (dot) _selectRow(parseInt(dot.getAttribute('data-idx'), 10));
-    });
+    };
 
     svg._markerLine = marker;
     svg._xPxFn = xPx;
@@ -659,13 +983,44 @@ LabReview.PerfReviewPage = (function () {
 
   function _updateChartMarkers(idx) {
     if (!_chartScroll) return;
-    _chartScroll.querySelectorAll('.pr-sparkline').forEach(function (svg) {
+    _chartScroll.querySelectorAll('.pr-metric-card').forEach(function (card) {
+      const svg = card.querySelector('.pr-sparkline');
+      if (!svg) return;
       const line = svg._markerLine;
-      if (!line || !svg._xPxFn) return;
-      if (idx < 0 || idx >= svg._n) { line.setAttribute('opacity', '0'); return; }
-      const x = svg._xPxFn(idx).toFixed(1);
-      line.setAttribute('x1', x); line.setAttribute('x2', x); line.setAttribute('opacity', '0.85');
+      const selected = idx >= 0 && idx < svg._n;
+      if (line && svg._xPxFn) {
+        line.setAttribute('opacity', selected ? '0.85' : '0');
+        if (selected) {
+          const x = svg._xPxFn(idx).toFixed(1);
+          line.setAttribute('x1', x); line.setAttribute('x2', x);
+        }
+      }
+      svg.querySelectorAll('.pr-dot').forEach(function (dot) {
+        const active = selected && Number(dot.getAttribute('data-idx')) === idx;
+        dot.setAttribute('r', active ? '5' : '3.5');
+        dot.classList.toggle('pr-dot--selected', active);
+      });
+      const selection = card.querySelector('.pr-metric-card__selection');
+      const tooltip = card.querySelector('.pr-metric-card__tooltip');
+      if (!selection || !tooltip) return;
+      if (!selected) {
+        selection.textContent = 'Select a session to see its value';
+        tooltip.textContent = '';
+        card.classList.remove('pr-metric-card--selected');
+        return;
+      }
+      const value = card._chartValues[idx];
+      const number = value === null || !isFinite(value) ? 'No value recorded' : _fmtVal(value, card._chartDef.unit);
+      const date = _sessionDateTime(card._chartSessions[idx]);
+      selection.textContent = 'Session ' + (idx + 1) + ': ' + number;
+      tooltip.textContent = card._chartDef.label + ' · ' + date + ' · ' + number;
+      card.classList.add('pr-metric-card--selected');
     });
+  }
+
+  function _fmtAxisTick(value) {
+    const abs = Math.abs(value);
+    return abs >= 100 ? value.toFixed(0) : abs >= 10 ? value.toFixed(1) : value.toFixed(2);
   }
 
   // ---- Helpers ----------------------------------------------------------------
@@ -673,6 +1028,8 @@ LabReview.PerfReviewPage = (function () {
   function _headlineMetric(session) {
     const m = session.metrics || {};
     const d = session.drill_key || '';
+    if (d === 'pvt_fitts') return String(m.completed_rounds ?? '--');
+    if (d === 'fitts_pvt_clay') return m.hits_pct == null ? '--' : Number(m.hits_pct).toFixed(1) + '%';
     const field = d === 'pvt' ? 'hits_pct' : d === 'gng' ? 'overall_accuracy_pct' :
       d === 'behavioral_discrimination' ? 'discrimination.discrimination_accuracy_pct' : '';
     const value = field ? _readMetric(m, field) : null;
@@ -680,11 +1037,13 @@ LabReview.PerfReviewPage = (function () {
   }
 
   function _headlineLabel(session) {
-    return session.drill_key === 'pvt' ? 'Hits' : 'Accuracy';
+    return session.drill_key === 'pvt' ? 'Hits' : session.drill_key === 'pvt_fitts' ? 'Rounds' :
+      session.drill_key === 'fitts_pvt_clay' ? 'Hit rate' : 'Accuracy';
   }
 
   function _readMetric(metrics, field) {
-    if (field === 'duration_s' && metrics.duration_basis !== 'first_to_last_trial') return null;
+    if (field === 'duration_s' && metrics.duration_basis &&
+        !['first_to_last_trial', 'scenario_elapsed'].includes(metrics.duration_basis)) return null;
     let value = field.split('.').reduce(function (item, key) {
       return item == null ? undefined : item[key];
     }, metrics);
@@ -712,17 +1071,20 @@ LabReview.PerfReviewPage = (function () {
     return value == null || !isFinite(Number(value)) ? null : Number(value);
   }
 
+  function _readBiosignal(biosignals, field) {
+    let value = biosignals[field];
+    // Sessions saved before pupil_mean_mm was introduced still have both eye means.
+    if (field === 'pupil_mean_mm' && value == null) {
+      const left = Number(biosignals.pupil_l_mean_mm);
+      const right = Number(biosignals.pupil_r_mean_mm);
+      if (isFinite(left) && isFinite(right)) value = (left + right) / 2;
+    }
+    return value == null || !isFinite(Number(value)) ? null : Number(value);
+  }
+
   function _formatDate(s) {
     if (!s) return '--';
     return s.slice(0, 10);
-  }
-
-  function _shortDate(session) {
-    const stamp = session.saved_at ? new Date(session.saved_at) : null;
-    if (stamp && !isNaN(stamp.getTime())) {
-      return stamp.toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-    }
-    return _formatDate(session.date || '');
   }
 
   function _sessionDateTime(session) {

@@ -14,6 +14,15 @@
   overflow: hidden;
 }
 
+.pr-topbar-title {
+  font-family: 'Segoe UI Variable Text', 'Aptos', 'Segoe UI', Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
 .pr-shell {
   display: flex;
   width: 100%;
@@ -195,10 +204,12 @@
 .pr-chart-panel {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--bg-root);
+  font-family: 'Segoe UI Variable Text', 'Aptos', 'Segoe UI', Arial, sans-serif;
 }
 
 .pr-chart-header {
@@ -241,13 +252,48 @@
 
 .pr-chart-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--space-lg);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-auto-rows: max-content;
   align-content: start;
   gap: var(--space-lg);
+}
+
+.pr-chart-section {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: var(--space-lg);
+  min-width: 0;
+}
+
+.pr-chart-section__heading {
+  grid-column: 1 / -1;
+  padding: 2px 2px 0;
+}
+
+.pr-chart-section__heading h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.pr-chart-section__heading p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.pr-chart-section--physio {
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .pr-metric-card {
@@ -255,13 +301,24 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--panel-radius);
   box-shadow: var(--shadow-panel);
+  position: relative;
+  min-width: 0;
+  min-height: 246px;
+  align-self: start;
   overflow: hidden;
+}
+
+.pr-metric-card:focus-visible {
+  outline: 2px solid var(--border-active);
+  outline-offset: 2px;
 }
 
 .pr-metric-card__header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   padding: var(--space-md) var(--space-lg) var(--space-sm);
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -270,6 +327,8 @@
   font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .pr-metric-card__meta {
@@ -285,15 +344,58 @@
 }
 
 .pr-sparkline-wrap {
-  padding: var(--space-sm) var(--space-md) var(--space-md);
+  padding: var(--space-sm) var(--space-md) 0;
   position: relative;
 }
 
 .pr-sparkline {
   display: block;
   width: 100%;
-  height: 100px;
-  overflow: visible;
+  height: 156px;
+  overflow: hidden;
+}
+
+.pr-metric-card__selection {
+  min-height: 18px;
+  padding: 4px var(--space-lg) var(--space-md);
+  font-family: 'Segoe UI Variable Text', 'Aptos', 'Segoe UI', Arial, sans-serif;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.pr-metric-card--selected .pr-metric-card__selection {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.pr-metric-card__tooltip {
+  position: absolute;
+  z-index: 2;
+  top: 52px;
+  left: var(--space-lg);
+  right: var(--space-lg);
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-sidebar);
+  box-shadow: var(--shadow-popup);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.pr-metric-card--selected:hover .pr-metric-card__tooltip,
+.pr-metric-card--selected:focus-visible .pr-metric-card__tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pr-dot--selected {
+  stroke-width: 2.5;
 }
 
 .pr-chart-empty {
@@ -338,4 +440,21 @@
   .pr-query-panel { width: 100%; min-width: 0; max-height: 48vh; min-height: 300px; }
   .pr-chart-panel { flex: 0 0 auto; min-height: 52vh; overflow: visible; }
   .pr-chart-scroll { grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); overflow: visible; }
+  .pr-chart-section { grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
 }
+.pr-detail { grid-column: 1 / -1; min-width: 0; padding: 1rem 1.25rem 2rem; color: var(--text-primary); }
+.pr-detail h2 { margin: 0.6rem 0 0.3rem; overflow-wrap: anywhere; }
+.pr-detail h3 { margin: 1.4rem 0 0.6rem; font-size: 0.95rem; }
+.pr-detail > p { color: var(--text-secondary); }
+.pr-detail-back { cursor: pointer; border: 0; background: transparent; color: var(--accent-blue); font: inherit; padding: 0; }
+.pr-detail-back:hover { text-decoration: underline; }
+.pr-detail-back:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
+.pr-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 0.75rem; }
+.pr-detail-card { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; padding: 0.85rem; border-radius: 0.55rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); box-shadow: var(--shadow-panel); }
+.pr-detail-card span { color: var(--text-secondary); font-size: 0.8125rem; text-transform: capitalize; }
+.pr-detail-card strong { color: var(--text-primary); font-size: 1.1rem; overflow-wrap: anywhere; }
+.pr-detail-round { margin-bottom: 0.75rem; padding: 0.85rem; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 0.55rem; box-shadow: var(--shadow-panel); }
+.pr-detail-round summary { cursor: pointer; color: var(--text-primary); font-weight: 600; }
+.pr-detail-round summary:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; }
+.pr-detail-component { margin-top: 0.9rem; }
+.pr-detail-component h4 { margin: 0 0 0.55rem; color: var(--text-secondary); }

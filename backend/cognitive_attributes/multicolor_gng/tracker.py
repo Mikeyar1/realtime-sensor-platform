@@ -48,6 +48,7 @@ class _GngTrialState:
     target_name:  str
     target_type:  str          # "go" | "no_go"
     round_number: int
+    round_attempt: int
     activated_at: float        # scenario-time seconds at Target Appeared
     pending_shot_id: str = ""
     pending_shot_at: Optional[float] = None
@@ -62,6 +63,7 @@ class CompletedMulticolorGngTrial:
     target_name:  str
     target_type:  str
     round_number: int
+    round_attempt: int
     result:       str
     rt_ms:        Optional[float]
     activated_at: float
@@ -86,6 +88,7 @@ class MulticolorGngTracker(CustomLslSessionBase):
         self._completed: list[CompletedMulticolorGngTrial]  = []
         self._trial_counter = 0
         self._wild_shots     = 0   # Shot Missed — background misses
+        self._wild_shots_by_round: dict[tuple[int, int], int] = {}
 
     # Standard tracker interface (same shape as every other cognitive attribute)
 
@@ -94,6 +97,7 @@ class MulticolorGngTracker(CustomLslSessionBase):
         self._completed.clear()
         self._trial_counter = 0
         self._wild_shots = 0
+        self._wild_shots_by_round.clear()
 
     def on_virtra_event(self, event_type: str, timestamp: float, metadata_dict: dict):
         return
@@ -123,7 +127,11 @@ class MulticolorGngTracker(CustomLslSessionBase):
             "stopped_at":     stopped_at,
             "duration_s":     duration_s,
             "wild_shots":     self._wild_shots,
-            "rounds":         len(self.round_history),
+            "wild_shots_by_round": [
+                {"round_number": number, "round_attempt": attempt, "count": count}
+                for (number, attempt), count in self._wild_shots_by_round.items()
+            ],
+            "rounds":         self.rounds_snapshot(),
             "trials":         trials,
             "biosignals":     biosignals or {},
         }
@@ -149,6 +157,23 @@ class MulticolorGngTracker(CustomLslSessionBase):
                         trial.pending_shot_at, event.scenario_time_s)
         self._active.clear()
 
+    def on_round_completed(self, round_number: int, metrics: dict) -> None:
+        if not self.round_history:
+            return
+        record = self.round_history[-1]
+        for trial in list(self._active.values()):
+            if trial.round_number != round_number or trial.round_attempt != record.attempt:
+                continue
+            self._active.pop(trial.target_id, None)
+            self._close(trial, self._timeout_result(trial), None,
+                        trial.pending_shot_at, trial.activated_at, broadcast=False)
+        trials = [self._trial_to_dict(trial) for trial in self._completed
+                  if trial.round_number == round_number and trial.round_attempt == record.attempt]
+        record.metrics = compute_metrics(
+            trials, self._wild_shots_by_round.get((round_number, record.attempt), 0))
+        if "gng" in record.components:
+            record.components["gng"]["metrics"] = record.metrics
+
     @staticmethod
     def _timeout_result(trial: _GngTrialState) -> str:
         if trial.pending_shot_at is not None:
@@ -173,7 +198,6 @@ class MulticolorGngTracker(CustomLslSessionBase):
                 active.ambiguous_shot_ids.add(shot_id)
 
     def _on_shot_missed(self, event: CustomLslEvent):
-        self._wild_shots += 1
         shot = event.data.get("shot", event.data)
         shot_id = str(shot.get("shot_id") or "")
         target = shot.get("target", {})
@@ -186,6 +210,9 @@ class MulticolorGngTracker(CustomLslSessionBase):
             if only.pending_shot_at is not None:
                 trial = only
         if trial is None:
+            self._wild_shots += 1
+            round_key = (self.current_round, self._round_open.attempt if self._round_open else 1)
+            self._wild_shots_by_round[round_key] = self._wild_shots_by_round.get(round_key, 0) + 1
             return
         self._active.pop(trial.target_id, None)
         fired_at = trial.pending_shot_at or shot.get("fired_time_since_start_seconds") or event.scenario_time_s
@@ -208,14 +235,15 @@ class MulticolorGngTracker(CustomLslSessionBase):
             target_name  = d.get("target_name", ""),
             target_type  = target_type,
             round_number = self.current_round,
+            round_attempt = self._round_open.attempt if self._round_open else 1,
             activated_at = d.get("spawn_timestamp_seconds", event.scenario_time_s),
         )
 
     def _on_shot_hit(self, event: CustomLslEvent):
-        shot   = event.data.get("shot", {})
+        shot   = event.data.get("shot", event.data)
         shot_id = str(shot.get("shot_id") or "")
         target = shot.get("target", {})
-        target_id = shot.get("entity_id") or target.get("target_id", "")
+        target_id = shot.get("entity_id") or target.get("target_id") or shot.get("target_id", "")
 
         trial = self._active.pop(target_id, None)
         if trial is None:
@@ -231,7 +259,7 @@ class MulticolorGngTracker(CustomLslSessionBase):
         self._close(trial, result, rt_ms, event.scenario_time_s, event.scenario_time_s)
 
     def _on_target_timed_out(self, event: CustomLslEvent):
-        target    = event.data.get("target", {})
+        target    = event.data.get("target", event.data)
         target_id = target.get("target_id", "")
 
         trial = self._active.pop(target_id, None)
@@ -241,13 +269,14 @@ class MulticolorGngTracker(CustomLslSessionBase):
         result = self._timeout_result(trial)
         self._close(trial, result, None, trial.pending_shot_at, event.scenario_time_s)
 
-    def _close(self, trial: _GngTrialState, result: str, rt_ms: Optional[float], shot_at: Optional[float], completed_at: float):
+    def _close(self, trial: _GngTrialState, result: str, rt_ms: Optional[float], shot_at: Optional[float], completed_at: float, broadcast: bool = True):
         completed = CompletedMulticolorGngTrial(
             trial_number = trial.trial_number,
             target_id    = trial.target_id,
             target_name  = trial.target_name,
             target_type  = trial.target_type,
             round_number = trial.round_number,
+            round_attempt = trial.round_attempt,
             result       = result,
             rt_ms        = rt_ms,
             activated_at = trial.activated_at,
@@ -255,7 +284,8 @@ class MulticolorGngTracker(CustomLslSessionBase):
             completed_at = completed_at,
         )
         self._completed.append(completed)
-        self._broadcast_update(completed)
+        if broadcast:
+            self._broadcast_update(completed)
 
     @staticmethod
     def _trial_to_dict(t: CompletedMulticolorGngTrial) -> dict:
@@ -265,6 +295,8 @@ class MulticolorGngTracker(CustomLslSessionBase):
             "target_name":  t.target_name,
             "target_type":  t.target_type,
             "round_number": t.round_number,
+            "round_attempt": t.round_attempt,
+            "component":    "gng",
             "result":       t.result,
             "rt_ms":        round(t.rt_ms, 2) if t.rt_ms is not None else None,
             "activated_at": t.activated_at,
@@ -275,7 +307,12 @@ class MulticolorGngTracker(CustomLslSessionBase):
     # Running metrics (ms-based — consumed live by the frontend trial_update handler)
 
     def _compute_running_metrics(self) -> dict:
-        return {**compute_metrics(self.get_completed_trials(), self._wild_shots),
+        current = [t for t in self.get_completed_trials()
+                   if t["round_number"] == self.current_round
+                   and t["round_attempt"] == (self._round_open.attempt if self._round_open else 1)]
+        attempt = self._round_open.attempt if self._round_open else 1
+        return {**compute_metrics(current,
+                                  self._wild_shots_by_round.get((self.current_round, attempt), 0)),
                 "round": self.current_round}
 
     # Broadcast
