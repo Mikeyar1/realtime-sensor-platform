@@ -59,12 +59,10 @@ a = Analysis(
     # Packages whose submodules are loaded dynamically (imported by string at runtime)
     hiddenimports=[
         # cognitive_attributes are registered by name and instantiated dynamically
-        # Note: gng/ is currently an empty placeholder — add tracker/metrics here when implemented
         "cognitive_attributes",
         "cognitive_attributes.pvt",
         "cognitive_attributes.pvt.tracker",
         "cognitive_attributes.pvt.metrics",
-        "cognitive_attributes.gng",
         "cognitive_attributes.multicolor_gng",
         "cognitive_attributes.multicolor_gng.tracker",
         "cognitive_attributes.multicolor_gng.metrics",

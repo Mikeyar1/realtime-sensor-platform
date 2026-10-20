@@ -23,7 +23,7 @@ from typing import Optional
 import re
 import uuid
 
-from .event_decoder import CustomLslEvent
+from event_decoders.custom_lsl import CustomLslEvent
 
 _LIFECYCLE_START = "Scenario Started"
 _LIFECYCLE_STOP  = ("Scenario Stopped", "Scenario Destroyed")

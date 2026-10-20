@@ -9,7 +9,6 @@ metrics_source = "custom"
 canonical_key = "gng"
 label = "Go/No-Go"
 task_type = "GNG"
-metric_module = "gng"
 default_component = "gng"
 
 [drills.multicolor_gng.components.gng]

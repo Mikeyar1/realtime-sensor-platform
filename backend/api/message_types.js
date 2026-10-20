@@ -46,10 +46,6 @@ export const MSG = Object.freeze({
   // Analysis results
   METRICS_READY: 'session.metrics_ready',
 
-  // Session record save flow
-  SESSION_SAVE_RECORD: 'session.save_record',
-  SESSION_RECORD_SAVED: 'session.record_saved',
-
   // Real-time signals
   VIRTRA_EVENT: 'session.virtra_event',
   CUSTOM_LSL_EVENT: 'session.custom_lsl_event',

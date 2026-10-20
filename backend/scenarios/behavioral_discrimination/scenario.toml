@@ -9,7 +9,6 @@ metrics_source = "native"
 canonical_key = "behavioral_discrimination"
 label = "Behavioral Discrimination"
 task_type = "DISCRIMINATION"
-metric_module = "discrimination"
 default_component = "discrimination"
 
 [drills.behavioral_discrimination.components.pvt]

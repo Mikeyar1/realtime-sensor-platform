@@ -11,7 +11,6 @@ assessment_profile = "pvt_fitts_core"
 canonical_key = "fitts_pvt_clay"
 label = "Fitts-PVT Clay"
 task_type = "PVT_FITTS"
-metric_module = "fitts_pvt_clay"
 default_component = "pvt_fitts"
 
 [drills.fitts_pvt_clay.components.pvt_fitts]

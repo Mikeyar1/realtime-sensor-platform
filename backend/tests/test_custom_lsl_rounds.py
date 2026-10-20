@@ -15,7 +15,7 @@ from cognitive_attributes.multicolor_gng.tracker import MulticolorGngTracker
 from services import database
 from services.virtra_stream_config import VirtraStreamConfig, _upgrade_v1, _validate
 from services.virtra_scenario_orchestrator import VirTraScenarioOrchestrator
-from virtra_custom_lsl.event_decoder import CustomLslEvent, decode_custom_lsl_sample
+from event_decoders.custom_lsl import CustomLslEvent, decode_custom_lsl_sample
 from virtra_custom_lsl.session import CustomLslSessionBase
 
 

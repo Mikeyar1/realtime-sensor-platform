@@ -8,20 +8,6 @@ discovery_interval_seconds = 0.5
 # Max seconds to wait for a sample before polling again
 pull_timeout_seconds = 1.0
 
-[analysis]
-# Path to the Analysis package (relative to Backend/)
-analysis_directory = "../analysis"
-# Path to the session DB directory (used by AnalysisTrigger to find the latest DB)
-session_directory = "../total-recall/sessions"
-# Delay in seconds after Scenario Stopped before running Analysis.
-# Gives the recording process time to flush all events to disk.
-post_scenario_delay_s = 3.0
-
-[session_data]
-# Directory where permanent session records are saved (relative to Backend/).
-# One sub-folder per completed session: <drill_key>_<participant_id>_<YYYY-MM-DD_HH-MM-SS>/session_record.json
-session_data_directory = "../data/SessionData"
-
 [database]
 # Path to the SQLite database file (relative to Backend/).
 # The database/ directory will be created automatically at startup if it does not exist.

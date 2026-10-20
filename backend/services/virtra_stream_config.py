@@ -142,13 +142,6 @@ def _upgrade_v1(data: dict) -> dict:
             "allow_round_start_without_scenario_start", True),
     }
     drills = upgraded.get("drills", {})
-    fitts_clay = drills.get("fitts_pvt_clay")
-    if fitts_clay is not None:
-        binding = DRILLS["fitts_pvt_clay"]
-        fitts_clay.setdefault("category_id", binding.category_id)
-        fitts_clay.setdefault("assessment_profile", CATEGORIES[binding.category_id].profile.id)
-        fitts_clay.setdefault("default_preset_label", "Default")
-        fitts_clay.setdefault("default_settings", dict(binding.default_settings))
     for name, drill in drills.items():
         native_enabled = drill.pop("native_scoring_enabled", False)
         custom_enabled = drill.pop("custom_scoring_enabled", False)
@@ -379,16 +372,6 @@ class VirtraStreamConfig:
                 continue
             if any(alias.casefold().strip() == key for alias in drill["native_scenarios"]):
                 return copy.deepcopy(drill)
-        return None
-
-    def component_for_phase(self, drill: dict, phase: str | None) -> str | None:
-        """A missing phase uses the configured default; unknown phases stay unknown."""
-        key = (phase or "").casefold().strip()
-        if not key:
-            return drill["default_component"]
-        for name, component in drill["components"].items():
-            if key in {value.casefold().strip() for value in component["phase_values"]}:
-                return name
         return None
 
     def event_names(self, event_key: str, drill: dict | None = None,

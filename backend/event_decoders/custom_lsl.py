@@ -1,5 +1,5 @@
 """
-virtra_custom_lsl/event_decoder.py — Decodes raw custom VirTra LSL samples.
+custom_lsl.py — Decodes raw custom VirTra LSL samples.
 
 The custom stream ("virtra_lsl", type "VirTra Events") sends 4 string
 channels per sample:

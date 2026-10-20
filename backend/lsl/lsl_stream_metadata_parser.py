@@ -21,10 +21,6 @@ def parse_lsl_stream_metadata(info) -> dict:
     }
 
 
-# Alias for backward compatibility
-parse_stream_info = parse_lsl_stream_metadata
-
-
 def _parse_channels(info) -> list[dict]:
     channel_count = info.channel_count()
 

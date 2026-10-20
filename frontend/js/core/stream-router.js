@@ -142,15 +142,9 @@ LabReview.StreamRouter = (function () {
         // Speech has no active frontend view.
         break;
 
-      // ── AAR: computed metrics from Analysis (fired after scenario ends) ───
-      // Backend sends this after Analysis has computed all drill metrics.
+      // AAR metrics computed after the scenario ends.
       case 'session.metrics_ready':
         LabReview.EventBus.emit('metrics-ready', msg);
-        break;
-
-      // ── Session record saved (operator clicked Save) ────────────────────
-      case 'session.record_saved':
-        LabReview.EventBus.emit('record-saved', msg);
         break;
 
       // ── PVT real-time trial update → unified trial-update event ─────────────────

@@ -9,7 +9,6 @@ metrics_source = "disabled"
 canonical_key = "pvt_fitts_gng"
 label = "PVT / Go-No-Go"
 task_type = "COMPOSITE"
-metric_module = ""
 default_component = "pvt"
 
 [drills.basepvt_fitts_gng_clay.components.pvt]

@@ -9,7 +9,6 @@ metrics_source = "native"
 canonical_key = "pvt_fitts"
 label = "PVT / Fitts"
 task_type = "PVT_FITTS"
-metric_module = ""
 default_component = "pvt"
 
 [drills.basepvt_fitts_clay.components.pvt]

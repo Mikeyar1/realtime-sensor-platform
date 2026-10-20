@@ -39,9 +39,7 @@ events = [
 [cognitive_attributes.pvt]
 label         = "PVT"
 task_type     = "PVT"                # → cognitive_attributes/pvt/tracker.py
-metric_module = "pvt"                # → cognitive_attributes/pvt/metrics.py
 description   = "Sustained attention assessment — trainee responds to visual stimuli as rapidly as possible."
-scenarios = [] # Registered in backend/scenarios/
 
 # Target filtering for PVT.
 # valid_targets  = only these names open a trial (case-insensitive).
@@ -64,9 +62,7 @@ lapse_multiplier = 1.5
 [cognitive_attributes.behavioral_discrimination]
 label         = "Behavioral Discrimination"
 task_type     = "DISCRIMINATION"     # → cognitive_attributes/discrimination/tracker.py
-metric_module = "discrimination"     # → cognitive_attributes/discrimination/metrics.py
 description   = "Two-phase drill: PVT vigilance block, then threat/non-threat discrimination under time pressure."
-scenarios = [] # Registered in backend/scenarios/
 
 
 # Threat class is read from the target name suffix (*_threat / *_nonthreat),
@@ -82,11 +78,3 @@ ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)"]
 grace_window_ms  = 200
 # PVT-phase lapse threshold = median RT × this.
 lapse_multiplier = 1.5
-
-
-# ── Calibration / Non-scored ──────────────────────────────────────────────────
-# Scenarios listed here are explicitly recognized as non-training.
-# The Backend logs "ignoring known non-drill scenario" and starts no session.
-# Any scenario without an enabled contract in backend/scenarios/ is ignored.
-[calibration]
-scenarios = ["Boresight"]

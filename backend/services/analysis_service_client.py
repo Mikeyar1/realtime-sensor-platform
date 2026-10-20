@@ -8,9 +8,7 @@ Responsibilities:
   1. Compute summary metrics from the trial list via the attribute's metrics function.
   2. Auto-save legacy sessions; round assessments are durable at round closure.
   3. Broadcast session.metrics_ready to all connected Frontend clients.
-  4. Cache session_record + metrics for operator-driven confirm/discard flow.
-     - db.confirm_session — updates participant name in DB
-     - db.discard_session — deletes session from DB
+  4. Broadcast the saved session ID for operator confirmation or discard.
 """
 
 import asyncio
@@ -54,8 +52,7 @@ def _compute_metrics_for_session(session_record: dict) -> Optional[dict]:
 class AnalysisServiceClient:
 
     """
-    Manages post-scenario metric computation, auto-save to DB and disk,
-    and the operator confirm/discard flow.
+    Manages post-scenario metric computation and auto-save to DB.
     """
 
     def __init__(
@@ -65,12 +62,6 @@ class AnalysisServiceClient:
     ):
         self._broadcast = broadcast_fn
         self._loop = loop
-
-        # Pending state — populated after auto-save, cleared after confirm or discard.
-        # These allow the operator to correct the participant name or discard the session.
-        self._pending_metrics:          dict | None = None
-        self._pending_session_record:   dict | None = None
-        self._pending_session_metadata: dict | None = None
 
     async def run_after_live_scenario(
         self,
@@ -83,8 +74,7 @@ class AnalysisServiceClient:
         Post-scenario workflow (runs after scenario stops):
           1. Compute summary metrics from the trial list.
           2. Auto-save to SQLite DB (sole persistence layer).
-          3. Cache everything for the operator confirm/discard panel.
-          4. Broadcast session.metrics_ready to all connected clients.
+          3. Broadcast session.metrics_ready for the operator confirm/discard panel.
 
         Args:
             drill_key:        The cognitive attribute key ("pvt", "gng", ...).
@@ -159,12 +149,6 @@ class AnalysisServiceClient:
             run_id = session_record.get("session_id", "")
             snapshot = await self._loop.run_in_executor(
                 None, round_repository.get_run, run_id) if round_repository.available() else None
-            self._pending_metrics = metrics
-            self._pending_session_record = session_record
-            self._pending_session_metadata = {
-                "drill_key": drill_key, "scenario_name": scenario_name,
-                "session_uuid": run_id, "participant_name": "",
-            }
             await self._broadcast({
                 "type": "session.metrics_ready", "drill_key": drill_key,
                 "scenario_name": scenario_name, "metrics": metrics,
@@ -230,24 +214,14 @@ class AnalysisServiceClient:
             None, _get_auto_name
         )
 
-        # 3. Cache for operator confirm/discard
-        self._pending_metrics          = metrics
-        self._pending_session_record   = session_record
-        self._pending_session_metadata = {
-            "drill_key":        drill_key,
-            "scenario_name":    scenario_name,
-            "session_uuid":     session_uuid,
-            "participant_name": display_name,
-        }
-
-        # 4. Broadcast metrics_ready — frontend shows Confirm/Discard panel
+        # Broadcast metrics_ready — frontend shows Confirm/Discard panel.
         await self._broadcast({
             "type":             "session.metrics_ready",
             "drill_key":        drill_key,
             "scenario_name":    scenario_name,
             "metrics":          metrics,
             "session_uuid":     session_uuid,
-            "participant_name": self._pending_session_metadata["participant_name"],
+            "participant_name": display_name,
             "auto_saved":       db_session_id is not None,
             "capture_status":   session_record.get("capture_status", "complete"),
             "rounds":           session_record.get("rounds", []),
@@ -255,22 +229,6 @@ class AnalysisServiceClient:
         print(f"[AnalysisServiceClient] Metrics ready + auto-saved: "
               f"drill={drill_key!r}  participant={participant_name!r}  db_id={db_session_id}")
 
-    # ── Pending result accessors ──────────────────────────────────────────────
-
-    def get_pending_metrics(self) -> dict | None:
-        """Return cached metrics from the last Analysis call, or None if not available."""
-        return self._pending_metrics
-
-    def get_pending_session_metadata(self) -> dict | None:
-        """Return cached session metadata from the last completed scenario, or None."""
-        return self._pending_session_metadata
-
-    def clear_pending(self) -> None:
-        """Clear cached metrics and metadata. Called after operator confirms or discards."""
-        self._pending_metrics          = None
-        self._pending_session_record   = None
-        self._pending_session_metadata = None
-        print("[AnalysisServiceClient] Pending metrics cleared")
 
 
 # ── DB helper (called via run_in_executor so it's off the event loop) ─────────

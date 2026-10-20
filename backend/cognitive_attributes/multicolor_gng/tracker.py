@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from virtra_custom_lsl.session import CustomLslSessionBase
-from virtra_custom_lsl.event_decoder import CustomLslEvent
+from event_decoders.custom_lsl import CustomLslEvent
 from .metrics import compute_metrics
 
 HIT               = "hit"

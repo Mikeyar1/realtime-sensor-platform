@@ -9,7 +9,6 @@ metrics_source = "native"
 canonical_key = "pvt"
 label = "PVT"
 task_type = "PVT"
-metric_module = "pvt"
 default_component = "pvt"
 
 [drills.pvt.components.pvt]

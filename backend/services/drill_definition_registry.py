@@ -2,10 +2,9 @@
 drill_definition_registry.py — Cognitive attribute configuration loader and scenario resolver.
 
 Loads config/drill_registry.toml and provides:
-  - resolve_drill(scenario_name) -> dict  (includes params, targets, metric_module)
-  - get_tracked_events(drill_key) -> list[str]
-  - get_all_drill_keys() -> list[str]
-  - get_shared_events() -> list[str]
+  - resolve_drill(scenario_name) -> dict  (includes params and targets)
+  - resolve_custom_lsl_drill(drill_type) -> dict
+  - all_tracked_events_for(drill_key) -> list[str]
 """
 
 import os
@@ -44,7 +43,7 @@ class DrillDefinitionRegistry:
         scenario_name (lowercase stripped) → cognitive attribute metadata dict
 
     The returned drill metadata dict contains everything the orchestrator needs:
-        drill_key, label, task_type, metric_module, params, targets, ...
+        drill_key, label, task_type, params, targets, ...
     """
 
     def __init__(self, toml_path: str = _TOML_PATH):
@@ -79,12 +78,9 @@ class DrillDefinitionRegistry:
                 "label":             attr_cfg.get("label", drill_key),
                 "description":       attr_cfg.get("description", ""),
                 "task_type":         task_type,
-                "metric_module":     attr_cfg.get("metric_module", ""),
                 "targets":           attr_cfg.get("targets", {}),
                 "params":            attr_cfg.get("params", {}),
                 "tracked_events":    attr_cfg.get("tracked_events", []),
-                "lane_start_events": attr_cfg.get("lane_start_events", []),
-                "lane_stop_events":  attr_cfg.get("lane_stop_events", []),
                 # Per-scenario param overrides — keyed by exact scenario name
                 "scenario_params":   attr_cfg.get("scenario_params", {}),
             }
@@ -135,7 +131,6 @@ class DrillDefinitionRegistry:
                 "label":           custom_cfg.get("label", drill_type),
                 "description":     custom_cfg.get("description", ""),
                 "task_type":       task_type,
-                "metric_module":   custom_cfg.get("metric_module", ""),
                 "targets":         custom_cfg.get("targets", {}),
                 "params":          custom_cfg.get("params", {}),
                 "custom_lsl_type": drill_type,
@@ -151,14 +146,9 @@ class DrillDefinitionRegistry:
                     self._custom_lsl_map.pop(alias_key, None)
                     continue
                 task_type = stream_drill["task_type"]
-                if task_type not in {"PVT", "GNG", "DISCRIMINATION", "PVT_FITTS", "COMPOSITE"}:
-                    raise ValueError(
-                        f"No implemented tracker for configured custom task_type {task_type!r}"
-                    )
                 from cognitive_attributes import ATTRIBUTE_REGISTRY
-                from cognitive_attributes.composite_custom import CompositeCustomTracker
                 tracker, _ = ATTRIBUTE_REGISTRY.get(task_type, (None, None))
-                if tracker is None or tracker is CompositeCustomTracker:
+                if tracker is None:
                     raise ValueError(f"Custom scorer for {task_type!r} is not implemented")
                 previous = self._custom_lsl_map.get(alias_key, {})
                 self._custom_lsl_map[alias_key] = {
@@ -166,7 +156,6 @@ class DrillDefinitionRegistry:
                     "drill_key": stream_drill.get("custom_result_key", stream_drill["canonical_key"]),
                     "label": stream_drill["label"],
                     "task_type": task_type,
-                    "metric_module": stream_drill.get("metric_module", ""),
                     "custom_lsl_type": alias,
                     "metrics_source": "custom",
                     "stream_policy": stream_drill,
@@ -223,30 +212,6 @@ class DrillDefinitionRegistry:
         """Return the tracked_events list for a given drill key."""
         attrs = self._data.get("cognitive_attributes", {})
         return attrs.get(drill_key, {}).get("tracked_events", [])
-
-    def get_shared_events(self) -> list[str]:
-        """Return events always captured for all cognitive attributes."""
-        return list(self._shared_events)
-
-    def get_all_drill_keys(self) -> list[str]:
-        """Return all three registered scored drill keys, including custom LSL."""
-        keys = list(self._data.get("cognitive_attributes", {}).keys())
-        for custom in self._custom_lsl_map.values():
-            key = custom.get("drill_key")
-            if key and key not in keys:
-                keys.append(key)
-        return keys
-
-    def get_drill_info(self, drill_key: str) -> Optional[dict]:
-        """Return full config for a drill key, or None if not found."""
-        attrs = self._data.get("cognitive_attributes", {})
-        cfg   = attrs.get(drill_key)
-        if cfg is None:
-            for custom in self._custom_lsl_map.values():
-                if custom.get("drill_key") == drill_key:
-                    return {"drill_key": drill_key, **custom}
-            return None
-        return {"drill_key": drill_key, **cfg}
 
     def all_tracked_events_for(self, drill_key: str) -> list[str]:
         """Return shared events + drill-specific tracked events combined."""
