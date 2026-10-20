@@ -44,6 +44,9 @@ for (const filename of ['standardized.js', 'aar-dashboard.js']) {
 
 const dashboard = context.LabReview.AAR.Dashboard;
 const specs = context.LabReview.AAR.Standardized.specs;
+assert.equal(context.LabReview.AAR.Standardized.assessmentProfile({
+  drill_key: 'another_scenario', assessment_profile: 'pvt_fitts_core',
+}).metricSet, 'PVT_FITTS');
 const purePvtPaths = specs.PVT.groups.flatMap(([, cards]) => cards.map(card => card.path))
   .filter(path => !['simulator', 'simulator_system', 'weapon_type'].includes(path));
 const fittsPaths = specs.PVT_FITTS.groups.flatMap(([, cards]) => cards.map(card => card.path));
@@ -51,7 +54,7 @@ assert.deepEqual(Array.from(fittsPaths), [
   'total_trials', 'round_duration_s', 'session_duration_s', 'completed_rounds',
   'rt_count', 'rt_mean_ms', 'rt_median_ms', 'rt_stdev_ms', 'rt_min_ms', 'rt_max_ms',
   'hits', 'hits_pct', 'omissions', 'misses', 'response_rate_pct', 'omission_rate_pct',
-  'total_shots_fired', 'shot_misses', 'hit_accuracy_pct',
+  'total_shots_fired', 'hit_accuracy_pct',
 ]);
 const mixedPvtPaths = specs.DISCRIMINATION.groups.flatMap(([, cards]) => cards.map(card => card.path))
   .filter(path => path.startsWith('pvt.')).map(path => path.slice(4));
@@ -92,19 +95,19 @@ assert.doesNotMatch(runRoot.textContent, /Round Duration/);
 
 vm.runInContext(fs.readFileSync(path.resolve(__dirname, '../js/pages/live-intel.js'), 'utf8'),
   context, { filename: 'live-intel.js' });
-const deriveFittsView = context.LabReview.LiveIntelPage.deriveFittsView;
+const deriveAssessmentView = context.LabReview.LiveIntelPage.deriveAssessmentView;
 const firstRound = { round_number: 1, attempt: 1, ended_at: null };
 const finishedRound = { ...firstRound, ended_at: 5, ended_reason: 'completed' };
 const secondRound = { round_number: 2, attempt: 1, ended_at: null };
-assert.equal(deriveFittsView([], 'CAPTURING', null).showBetween, false);
-assert.equal(deriveFittsView([firstRound], 'CAPTURING', null).current.round_number, 1);
-assert.equal(deriveFittsView([finishedRound], 'CAPTURING', null).showBetween, true);
-assert.equal(deriveFittsView([{ ...finishedRound, ended_reason: 'reset' }],
+assert.equal(deriveAssessmentView([], 'CAPTURING', null).showBetween, false);
+assert.equal(deriveAssessmentView([firstRound], 'CAPTURING', null).current.round_number, 1);
+assert.equal(deriveAssessmentView([finishedRound], 'CAPTURING', null).showBetween, true);
+assert.equal(deriveAssessmentView([{ ...finishedRound, ended_reason: 'reset' }],
   'CAPTURING', null).showBetween, true);
-assert.equal(deriveFittsView([finishedRound, secondRound], 'CAPTURING', null).current.round_number, 2);
-assert.equal(deriveFittsView([finishedRound], 'RESULTS',
+assert.equal(deriveAssessmentView([finishedRound, secondRound], 'CAPTURING', null).current.round_number, 2);
+assert.equal(deriveAssessmentView([finishedRound], 'RESULTS',
   { completed_rounds: 1, scoring_status: 'scored' }).showFinalCards, true);
-assert.equal(deriveFittsView([finishedRound], 'RESULTS',
+assert.equal(deriveAssessmentView([finishedRound], 'RESULTS',
   { completed_rounds: 1, scoring_status: 'pending_stream_contract' }).showFinalCards, false);
 
 dashboard.onScenarioStarted({ task_type: 'PVT', scenario_name: 'PVT example',

@@ -125,11 +125,43 @@ LabReview.AAR.Standardized = (function () {
         metric('response_rate_pct', 'Response Rate', '%', 'Hits plus misses divided by valid presentations; during a live round this rate uses resolved presentations.'),
         metric('omission_rate_pct', 'Omission Rate', '%', 'Omissions divided by valid presentations; during a live round this rate uses resolved presentations.'),
         metric('total_shots_fired', 'Total Shots Fired', '', 'Unique fired shots while the round is active.'),
-        metric('shot_misses', 'Shot Misses', '', 'Shots confirmed to have hit no target.'),
         metric('hit_accuracy_pct', 'Hit Accuracy', '%', 'Targets hit divided by total fired shots.'),
       ]],
     ],
   };
+
+  // A scoring profile describes the UI contract, independent of the VirTra
+  // scenario name or its drill key. New scenarios can reuse this profile.
+  const ASSESSMENT_PROFILES = {
+    pvt_fitts_core: {
+      metricSet: 'PVT_FITTS',
+      headlineField: 'hits_pct',
+      headlineLabel: 'Hit rate',
+      settings: [
+        ['Distance', 'active_distance_meters', 'm'],
+        ['Visibility', 'active_visibility_duration_seconds', 's'],
+        ['Spawn interval', 'active_spawn_interval_seconds', 's'],
+        ['Targets', 'active_targets_per_round', ''],
+        ['Concurrent', 'active_concurrent_targets', ''],
+      ],
+    },
+  };
+
+  const PHYSIOLOGY = [
+    { field: 'hr_mean_bpm', label: 'Heart Rate', unit: 'bpm', sampleField: 'hr_n_samples',
+      description: 'Average heart rate during this round.' },
+    { field: 'hrv_rmssd_ms', label: 'HRV (RMSSD)', unit: 'ms', sampleField: 'hrv_n_intervals',
+      description: 'Heart rate variability during this round.' },
+    { field: 'pupil_mean_mm', label: 'Pupil Diameter', unit: 'mm', sampleFields: ['pupil_l_n', 'pupil_r_n'],
+      description: 'Average pupil diameter during this round.' },
+  ];
+
+  function assessmentProfile(record) {
+    // Older saved rounds have no profile field; preserve their display.
+    const id = record?.assessment_profile ||
+      (record?.drill_key === 'fitts_pvt_clay' ? 'pvt_fitts_core' : '');
+    return ASSESSMENT_PROFILES[id] || null;
+  }
 
   function readPath(object, path) {
     return path.split('.').reduce((value, part) => value == null ? undefined : value[part], object);
@@ -298,5 +330,5 @@ LabReview.AAR.Standardized = (function () {
     };
   }
 
-  return { create, createMetricCards, specs: SPECS };
+  return { create, createMetricCards, specs: SPECS, assessmentProfile, physiology: PHYSIOLOGY, display };
 })();

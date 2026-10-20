@@ -1,0 +1,472 @@
+{
+  "format": "labreview.sanitized_lifecycle.v1",
+  "provenance": "data/lsl_captures/fitts-pvt-clay.jsonl; lifecycle projection",
+  "note": "Captured order and timestamps; no raw participant, target or scenario IDs. Includes duplicate samples.",
+  "events": [
+    {
+      "event_name": "Scenario Destroyed",
+      "round": 3,
+      "scenario_time_s": 0.46875,
+      "lsl_offset_s": 0.0,
+      "state": "WaitingForNextRound",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Default"
+    },
+    {
+      "event_name": "Scenario Started",
+      "round": 0,
+      "scenario_time_s": 0.1523438,
+      "lsl_offset_s": 119.994496,
+      "state": "WaitingForFixation",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Default"
+    },
+    {
+      "event_name": "Scenario Started",
+      "round": 0,
+      "scenario_time_s": 0.1523438,
+      "lsl_offset_s": 119.994496,
+      "state": "WaitingForFixation",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Default"
+    },
+    {
+      "event_name": "Round Started",
+      "round": 1,
+      "scenario_time_s": 10.11719,
+      "lsl_offset_s": 129.875154,
+      "state": "RoundActive",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Default"
+    },
+    {
+      "event_name": "Round Started",
+      "round": 1,
+      "scenario_time_s": 10.11719,
+      "lsl_offset_s": 129.875154,
+      "state": "RoundActive",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Default"
+    },
+    {
+      "event_name": "Round Completed",
+      "round": 1,
+      "scenario_time_s": 42.27441,
+      "lsl_offset_s": 162.048204,
+      "state": "WaitingForNextRound",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Default"
+    },
+    {
+      "event_name": "Round Completed",
+      "round": 1,
+      "scenario_time_s": 42.27441,
+      "lsl_offset_s": 162.048204,
+      "state": "WaitingForNextRound",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Default"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 52.91992,
+      "lsl_offset_s": 172.692066,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 52.91992,
+      "lsl_offset_s": 172.692066,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 54.18652,
+      "lsl_offset_s": 173.955389,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Hard"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 54.18652,
+      "lsl_offset_s": 173.955389,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Hard"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 55.43652,
+      "lsl_offset_s": 175.205848,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Long Range"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 55.43652,
+      "lsl_offset_s": 175.205848,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Long Range"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 56.48633,
+      "lsl_offset_s": 176.256076,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Rapid Pace"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 56.48633,
+      "lsl_offset_s": 176.256076,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Rapid Pace"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 57.36816,
+      "lsl_offset_s": 177.138056,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Wide 5screen"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 57.36816,
+      "lsl_offset_s": 177.138056,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Wide 5screen"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 58.58789,
+      "lsl_offset_s": 178.35673,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Default"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 58.58789,
+      "lsl_offset_s": 178.35673,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Default"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 59.80664,
+      "lsl_offset_s": 179.57558,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 1,
+      "scenario_time_s": 59.80664,
+      "lsl_offset_s": 179.57558,
+      "state": "WaitingForNextRound",
+      "settings": {},
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Round Reset",
+      "round": 1,
+      "scenario_time_s": 65.12305,
+      "lsl_offset_s": 184.884116,
+      "state": "WaitingForFixation",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Round Reset",
+      "round": 1,
+      "scenario_time_s": 65.12305,
+      "lsl_offset_s": 184.884116,
+      "state": "WaitingForFixation",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Round Started",
+      "round": 2,
+      "scenario_time_s": 66.49414,
+      "lsl_offset_s": 186.249544,
+      "state": "RoundActive",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Round Started",
+      "round": 2,
+      "scenario_time_s": 66.49414,
+      "lsl_offset_s": 186.249544,
+      "state": "RoundActive",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Round Completed",
+      "round": 2,
+      "scenario_time_s": 98.65918,
+      "lsl_offset_s": 218.430523,
+      "state": "WaitingForNextRound",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Round Completed",
+      "round": 2,
+      "scenario_time_s": 98.65918,
+      "lsl_offset_s": 218.430523,
+      "state": "WaitingForNextRound",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Round Reset",
+      "round": 2,
+      "scenario_time_s": 99.66992,
+      "lsl_offset_s": 219.430577,
+      "state": "WaitingForFixation",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Round Reset",
+      "round": 2,
+      "scenario_time_s": 99.66992,
+      "lsl_offset_s": 219.430577,
+      "state": "WaitingForFixation",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 2,
+        "active_spawn_interval_seconds": 2,
+        "active_targets_per_round": 15,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Baseline"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 2,
+      "scenario_time_s": 101.0361,
+      "lsl_offset_s": 221.242222,
+      "state": "WaitingForFixation",
+      "settings": {},
+      "preset": "Hard"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 2,
+      "scenario_time_s": 101.0361,
+      "lsl_offset_s": 221.242222,
+      "state": "WaitingForFixation",
+      "settings": {},
+      "preset": "Hard"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 2,
+      "scenario_time_s": 101.9834,
+      "lsl_offset_s": 222.583623,
+      "state": "WaitingForFixation",
+      "settings": {},
+      "preset": "Long Range"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 2,
+      "scenario_time_s": 101.9834,
+      "lsl_offset_s": 222.583623,
+      "state": "WaitingForFixation",
+      "settings": {},
+      "preset": "Long Range"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 2,
+      "scenario_time_s": 103.9238,
+      "lsl_offset_s": 225.110552,
+      "state": "WaitingForFixation",
+      "settings": {},
+      "preset": "Rapid Pace"
+    },
+    {
+      "event_name": "Preset Changed",
+      "round": 2,
+      "scenario_time_s": 103.9238,
+      "lsl_offset_s": 225.110552,
+      "state": "WaitingForFixation",
+      "settings": {},
+      "preset": "Rapid Pace"
+    },
+    {
+      "event_name": "Round Started",
+      "round": 3,
+      "scenario_time_s": 108.3818,
+      "lsl_offset_s": 229.483909,
+      "state": "RoundActive",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 1.2,
+        "active_spawn_interval_seconds": 1,
+        "active_targets_per_round": 25,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Rapid Pace"
+    },
+    {
+      "event_name": "Round Started",
+      "round": 3,
+      "scenario_time_s": 108.3818,
+      "lsl_offset_s": 229.483909,
+      "state": "RoundActive",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 1.2,
+        "active_spawn_interval_seconds": 1,
+        "active_targets_per_round": 25,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Rapid Pace"
+    },
+    {
+      "event_name": "Round Completed",
+      "round": 3,
+      "scenario_time_s": 134.9336,
+      "lsl_offset_s": 256.039576,
+      "state": "WaitingForNextRound",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 1.2,
+        "active_spawn_interval_seconds": 1,
+        "active_targets_per_round": 25,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Rapid Pace"
+    },
+    {
+      "event_name": "Round Completed",
+      "round": 3,
+      "scenario_time_s": 134.9336,
+      "lsl_offset_s": 256.039576,
+      "state": "WaitingForNextRound",
+      "settings": {
+        "active_distance_meters": 10,
+        "active_visibility_duration_seconds": 1.2,
+        "active_spawn_interval_seconds": 1,
+        "active_targets_per_round": 25,
+        "active_concurrent_targets": 1
+      },
+      "preset": "Rapid Pace"
+    }
+  ]
+}

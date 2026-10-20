@@ -813,7 +813,9 @@
   overflow: hidden;
 }
 .li-start-btn:focus-visible,
-.li-round-previous summary:focus-visible {
+.li-round-previous summary:focus-visible,
+.li-round-active summary:focus-visible,
+.li-round-summary summary:focus-visible {
   outline: 2px solid var(--accent-blue);
   outline-offset: 2px;
 }
@@ -879,16 +881,49 @@
 .li-round-metric strong { font-size: 0.95rem; color: var(--text-primary); overflow-wrap: anywhere; }
 .li-round-section--standard {
   margin: 0;
-  padding: var(--space-xl) var(--space-2xl) 0;
+  padding: var(--space-lg) var(--space-2xl) 0;
+  --live-card-min-height: 88px;
+  --live-card-padding: 12px;
+  --live-card-gap: 10px;
 }
 .li-round-section--standard .li-round-current,
-.li-round-section--standard .li-round-final {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  margin: 0;
-  padding: 0;
+.li-round-section--standard .li-round-final,
+.li-round-section--standard .li-round-previous {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--live-card-radius, 12px);
+  box-shadow: var(--shadow-panel);
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-md);
+}
+.li-round-section--standard .li-round-active summary,
+.li-round-section--standard .li-round-summary summary,
+.li-round-section--standard .li-round-previous summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.li-round-section--standard .li-round-active[open] summary,
+.li-round-section--standard .li-round-summary[open] summary,
+.li-round-section--standard .li-round-previous[open] summary {
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.li-round-section--standard .li-round-active .li-round-detail-body,
+.li-round-section--standard .li-round-summary .li-round-detail-body {
+  padding-top: 0;
+}
+.li-round-section--standard .li-round-waiting p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+.li-round-section--standard .aar-standard {
+  gap: var(--space-lg);
+}
+.li-round-section--standard .aar-standard .aar-section + .aar-section {
+  padding-top: var(--space-lg);
 }
 .li-round-section--standard .li-round-head h2 {
   margin: 0;
@@ -907,8 +942,7 @@
 .li-round-section--standard .li-round-participant {
   margin: 0 0 var(--space-lg);
 }
-.li-preset-panel,
-.li-round-physiology {
+.li-preset-panel {
   margin: 12px 0 18px;
   padding: 14px 16px;
   border: 1px solid var(--border-medium);
@@ -917,8 +951,7 @@
 }
 .li-preset-panel__heading { display: flex; align-items: baseline; gap: 12px; }
 .li-preset-panel__heading span,
-.li-preset-grid dt,
-.li-round-physiology__item span {
+.li-preset-grid dt {
   font-size: 0.74rem;
   color: var(--text-secondary);
   font-weight: 650;
@@ -927,22 +960,56 @@
 }
 .li-preset-panel__heading strong { font-size: 0.95rem; color: var(--text-primary); }
 .li-preset-panel__heading small { color: var(--text-muted); margin-left: auto; }
-.li-preset-grid,
-.li-round-physiology__grid {
+.li-preset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
   gap: 10px;
   margin: 12px 0 0;
 }
-.li-preset-grid > div,
-.li-round-physiology__item { display: flex; flex-direction: column; gap: 3px; }
+.li-preset-grid > div { display: flex; flex-direction: column; gap: 3px; }
 .li-preset-grid dd { margin: 0; font-weight: 650; color: var(--text-primary); }
-.li-round-physiology h3 { margin: 0; color: var(--text-primary); font-size: 0.9rem; }
-.li-round-physiology h3 small { margin-left: 8px; font-weight: 400; color: var(--text-muted); }
-.li-round-physiology__item strong { font-size: 1.2rem; color: var(--text-primary); }
-.li-round-physiology__item small { color: var(--text-muted); }
-.li-round-live-note { color: var(--text-secondary); font-size: 0.76rem; margin: 2px 0 10px; }
-.li-round-metric-note { color: var(--text-secondary); font-size: 0.76rem; margin: 10px 0; }
+.li-round-section--standard .li-round-physiology { margin: var(--space-lg) 0 0; }
+.li-round-section--standard .li-round-physiology .aar-section-label {
+  margin: 0 0 var(--space-md);
+  border: 0;
+  padding: 0;
+}
+.li-round-section--standard .li-round-physiology .aar-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--live-card-gap);
+}
+.li-round-section--standard .li-round-physiology .aar-card {
+  min-height: var(--live-card-min-height);
+  padding: var(--live-card-padding);
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--live-card-radius);
+  box-shadow: var(--shadow-panel);
+}
+.li-round-section--standard .li-round-physiology .aar-info-btn::after {
+  background: #fff;
+  color: var(--text-primary);
+  border-color: var(--border-medium);
+  box-shadow: var(--shadow-popup);
+}
+.li-round-section--standard .li-round-physiology .aar-info-btn:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+.li-round-section--standard .li-round-physiology .aar-info-btn:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+@media (max-width: 900px) {
+  .li-round-section--standard .li-round-physiology .aar-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .li-round-section--standard .li-round-physiology .aar-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .li-round-assignment__row { display: flex; gap: 8px; align-items: center; }
 .li-round-assignment__row input { min-width: 0; flex: 1; }
 .li-round-save-btn {
@@ -957,11 +1024,6 @@
 .li-round-save-status { display: block; margin: -10px 0 14px; color: var(--text-muted); font-size: 0.75rem; }
 .li-round-save-status.is-saved { color: var(--status-connected); }
 .li-save-error { color: #b83232; font-size: 0.8rem; }
-.li-round-section--standard .li-round-between {
-  margin: var(--space-md) 0;
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
 .li-round-section--standard .li-round-history {
   margin-top: var(--space-xl);
   border-top: 1px solid var(--border-subtle);
@@ -984,11 +1046,8 @@
 .li-round-section--standard .li-round-detail-body {
   padding-top: var(--space-md);
 }
-.li-round-section--standard .li-round-final {
-  padding-bottom: var(--space-xl);
-}
 .li-round-section--standard .li-round-final-context {
-  margin: 8px 0 var(--space-lg);
+  margin: 0 0 var(--space-lg);
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
 }

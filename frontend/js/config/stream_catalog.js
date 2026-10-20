@@ -78,8 +78,8 @@ LabReview.StreamCatalog = [
 
   {
     namePattern: /v_?300|virtra/i,
-    typePattern: /virtraevents/i,
-    label:       'VirTra Simulator (V-300)',
+    typePattern: /virtra\s*events/i,
+    label:       'VirTra events',
     display:     true,
   },
 

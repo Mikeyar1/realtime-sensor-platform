@@ -224,6 +224,10 @@ script_metrics = []
 # Native uses the existing PVT tracker for UI testing; custom uses the script's
 # virtra_lsl stream and per-round target-response tracker. Restart LabReview
 # after changing this value. The script does not emit Fitts throughput fields.
+# To reuse this custom assessment for another scenario with the same event
+# payloads, add its VirTra name to native_scenarios and its script drill_type
+# (if different) to custom_drill_types. Keep assessment_profile =
+# "pvt_fitts_core" so live and longitudinal views use the same metric layout.
 [drills.fitts_pvt_clay]
 metrics_source = "custom"
 category_id = "pvt_fitts"

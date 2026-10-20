@@ -634,11 +634,19 @@ def delete_history_session(session_uuid: str, participant_name: str) -> bool:
             ).fetchone()
             if row is None:
                 return False
+            shared_round = conn.execute("""SELECT 1 FROM rounds
+                WHERE session_id = ? AND participant_id IS NOT NULL
+                AND participant_id <> ? LIMIT 1""",
+                (row["id"], row["participant_id"])).fetchone()
+            if shared_round:
+                raise ValueError("This session contains rounds saved to another participant.")
             conn.execute("DELETE FROM sessions WHERE id = ?", (row["id"],))
             conn.execute(
                 """DELETE FROM participants WHERE id = ?
-                   AND NOT EXISTS (SELECT 1 FROM sessions WHERE participant_id = ?)""",
-                (row["participant_id"], row["participant_id"]),
+                   AND NOT EXISTS (SELECT 1 FROM sessions WHERE participant_id = ?)
+                   AND NOT EXISTS (SELECT 1 FROM rounds WHERE participant_id = ?)
+                   AND NOT EXISTS (SELECT 1 FROM assessment_rounds WHERE participant_id = ?)""",
+                (row["participant_id"],) * 4,
             )
             conn.commit()
             record_path = row["record_path"]
@@ -646,10 +654,49 @@ def delete_history_session(session_uuid: str, participant_name: str) -> bool:
     return True
 
 
+def delete_history_round(round_id: int, participant_name: str) -> bool:
+    """Delete one participant-owned legacy round and its trials."""
+    if not round_id or not participant_name:
+        return False
+    record_path = ""
+    with _lock:
+        with _connect() as conn:
+            row = conn.execute("""SELECT r.id, r.session_id, r.round_number, r.attempt,
+                       s.rounds_json, s.record_path
+                FROM rounds r JOIN sessions s ON s.id = r.session_id
+                JOIN participants p ON p.id = r.participant_id
+                WHERE r.id = ? AND p.participant_name = ? COLLATE NOCASE
+                  AND s.drill_key = 'fitts_pvt_clay' AND s.source = 'custom'""",
+                (round_id, participant_name)).fetchone()
+            if row is None:
+                return False
+            conn.execute("""DELETE FROM trials WHERE session_id = ?
+                AND round_number = ? AND round_attempt = ?""",
+                (row["session_id"], row["round_number"], row["attempt"]))
+            conn.execute("DELETE FROM rounds WHERE id = ?", (row["id"],))
+            remaining = conn.execute("SELECT 1 FROM rounds WHERE session_id = ? LIMIT 1",
+                                     (row["session_id"],)).fetchone()
+            if remaining:
+                snapshots = json.loads(row["rounds_json"] or "[]")
+                snapshots = [item for item in snapshots
+                             if (item.get("round_number"), item.get("attempt", 1)) !=
+                             (row["round_number"], row["attempt"])]
+                conn.execute("UPDATE sessions SET rounds_json = ? WHERE id = ?",
+                             (json.dumps(snapshots), row["session_id"]))
+            else:
+                conn.execute("DELETE FROM sessions WHERE id = ?", (row["session_id"],))
+                record_path = row["record_path"]
+            conn.commit()
+    if record_path:
+        _delete_record_files([record_path])
+    return True
+
+
 def delete_participant_history(participant_name: str) -> int:
-    """Delete a participant and every saved session, trial, and biosignal."""
+    """Delete a participant's sessions and saved rounds without deleting others' rounds."""
     if not participant_name or participant_name == UNASSIGNED_PARTICIPANT:
         return 0
+    orphan_record_paths = []
     with _lock:
         with _connect() as conn:
             participant = conn.execute(
@@ -659,13 +706,54 @@ def delete_participant_history(participant_name: str) -> int:
             if participant is None:
                 return 0
             rows = conn.execute(
-                "SELECT record_path FROM sessions WHERE participant_id = ?",
+                "SELECT id, record_path FROM sessions WHERE participant_id = ?",
                 (participant["id"],),
             ).fetchall()
+            shared_round = conn.execute("""SELECT 1 FROM rounds r
+                JOIN sessions s ON s.id = r.session_id
+                WHERE s.participant_id = ? AND r.participant_id IS NOT NULL
+                  AND r.participant_id <> ? LIMIT 1""",
+                (participant["id"], participant["id"])).fetchone()
+            if shared_round:
+                raise ValueError("A session contains rounds saved to another participant. Delete those rounds separately.")
+            assessment_count = conn.execute("""SELECT COUNT(*) FROM assessment_rounds
+                WHERE participant_id = ? AND save_status = 'saved'""",
+                (participant["id"],)).fetchone()[0]
+            legacy_rows = conn.execute("""SELECT r.session_id, r.round_number, r.attempt,
+                       s.rounds_json
+                FROM rounds r JOIN sessions s ON s.id = r.session_id
+                WHERE r.participant_id = ? AND s.participant_id <> ?""",
+                (participant["id"], participant["id"])).fetchall()
+            by_session = {}
+            for row in legacy_rows:
+                conn.execute("""DELETE FROM trials WHERE session_id = ?
+                    AND round_number = ? AND round_attempt = ?""",
+                    (row["session_id"], row["round_number"], row["attempt"]))
+                if row["session_id"] not in by_session:
+                    by_session[row["session_id"]] = [row["rounds_json"], set()]
+                by_session[row["session_id"]][1].add((row["round_number"], row["attempt"]))
+            for session_id, (raw_snapshots, removed_keys) in by_session.items():
+                snapshots = [item for item in json.loads(raw_snapshots or "[]")
+                             if (item.get("round_number"), item.get("attempt", 1))
+                             not in removed_keys]
+                conn.execute("UPDATE sessions SET rounds_json = ? WHERE id = ?",
+                             (json.dumps(snapshots), session_id))
+            conn.execute("DELETE FROM assessment_rounds WHERE participant_id = ?",
+                         (participant["id"],))
+            conn.execute("DELETE FROM rounds WHERE participant_id = ?",
+                         (participant["id"],))
+            for session_id in by_session:
+                if conn.execute("SELECT 1 FROM rounds WHERE session_id = ? LIMIT 1",
+                                (session_id,)).fetchone() is None:
+                    orphan = conn.execute("SELECT record_path, drill_key, source FROM sessions WHERE id = ?",
+                                          (session_id,)).fetchone()
+                    if orphan and orphan["drill_key"] == "fitts_pvt_clay" and orphan["source"] == "custom":
+                        conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+                        orphan_record_paths.append(orphan["record_path"])
             conn.execute("DELETE FROM participants WHERE id = ?", (participant["id"],))
             conn.commit()
-    _delete_record_files([row["record_path"] for row in rows])
-    return len(rows)
+    _delete_record_files([row["record_path"] for row in rows] + orphan_record_paths)
+    return len(rows) + assessment_count + len(legacy_rows)
 
 
 def _delete_record_files(paths: list[str]) -> None:
@@ -714,7 +802,7 @@ def get_sessions_for_participant(
             sql += " ORDER BY s.saved_at ASC, s.id ASC"
             rows = conn.execute(sql, params).fetchall()
             round_rows = conn.execute("""
-                SELECT s.session_uuid, s.drill_key, s.task_type, s.scenario_name,
+                SELECT r.id AS legacy_round_id, s.session_uuid, s.drill_key, s.task_type, s.scenario_name,
                        s.date, s.started_at, s.stopped_at, s.saved_at, s.source,
                        s.capture_status, r.round_number, r.attempt AS round_attempt,
                        r.preset_label, r.preset_mixed, r.ended_reason,

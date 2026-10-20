@@ -8,18 +8,18 @@ A real-time human performance monitoring dashboard built for VirTra-based simula
 
 During a training scenario, LabReview connects to hardware streams over [Lab Streaming Layer (LSL)](https://labstreaminglayer.org/) — including physiological sensors (e.g., Polar H10, Pupil Labs Neon eye tracking) and VirTra simulator events, and routes them through a Python backend to a browser-based dashboard. When a VirTra scenario starts, the backend identifies which cognitive assessment is running, instantiates the appropriate trial tracker, and streams live trial-by-trial metrics to the frontend over WebSocket.
 
-When the scenario stops, either from VirTra or the dashboard's Stop button, summary metrics are computed locally and shown in the after-action review (AAR) panel. Sessions with valid trials are auto-saved to the local database; the operator then confirms the participant name or discards the session.
+When the scenario stops, either from VirTra or the dashboard's Stop button, summary metrics are computed locally and shown in the after-action review (AAR) panel. Native sessions with valid trials are auto-saved; custom assessment rounds can be assigned to participants and saved individually.
 
 ## Supported scored drills
 
 | Drill | Input | Primary construct |
 | --- | --- | --- |
 | PVT | Registered native VirTra scenarios | Sustained attention / vigilance |
-| Fitts-PVT_Clay | `fitts_pvt` / `fitts_pvt_clay` custom VirTra LSL | Existing PVT metrics per round, with recorded preset and difficulty settings |
+| Fitts-PVT_Clay | `fitts_pvt` / `fitts_pvt_clay` custom VirTra LSL | PVT/Fitts metrics per round, with recorded preset and difficulty settings |
 | Go/No-Go | `multicolor_gng` custom VirTra LSL stream | Response inhibition / inhibitory control |
 | Behavioral Discrimination | Registered native VirTra scenarios | Perceptual / decision discrimination |
 
-Unknown scenarios and former Marksmanship scenarios do not start a scored session. Shared VirTra events may still appear in the raw event feed. The live and final cards use the same definitions for each drill; see [the current metric reference](METRICS.md).
+Unknown scenarios and former Marksmanship scenarios do not start a scored session. The frontend receives structured events and metrics from the backend; it does not subscribe to raw VirTra samples. Live and saved custom rounds with the same assessment profile share metric definitions and settings labels; see [the current metric reference](METRICS.md).
 
 ---
 
@@ -160,8 +160,10 @@ LabReview auto-discovers and subscribes to any LSL stream on the network. Stream
 | `HR`, `ECG`, `PPI`, `PPG`, `ACC`, `GYRO` | Polar H10 | HR/PPI used for HRV computation |
 | `Gaze`, `eye_events`, `IMU` | Pupil Labs Neon | Gaze batched at 50 ms intervals |
 | `VirTraEvents` | VirTra simulator | Drives scenario lifecycle and trial tracking |
-| `speech_transcription` | Microphone / Whisper | Displayed in the live event ticker |
+| `speech_transcription` | Microphone / Whisper | Ingested by the backend; no active frontend view |
 
-Missing hardware produces no errors — streams that aren't present are simply absent from the catalog.
+Missing hardware produces no errors — streams that aren't present are simply absent from the catalog. The frontend displays the catalog and scored messages; raw stream subscriptions remain in the backend.
+
+To reuse the Fitts-PVT custom assessment for another VirTra scenario with the same event payloads, add its scenario name to `native_scenarios` and its script `drill_type` (if different) to `custom_drill_types` in [`config/virtra_streams.toml`](config/virtra_streams.toml). Keep `assessment_profile = "pvt_fitts_core"`; the live and longitudinal views then use the existing round UI without frontend changes.
 
 For reproducible VirTra sessions, use the [raw LSL capture and replay tool](VIRTRA_LSL_CAPTURE.md). It records the original channels from both native and custom event streams, then republishes them for home testing. Console logs and scored session records do not contain the complete wire samples.

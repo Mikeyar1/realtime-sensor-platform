@@ -8,7 +8,6 @@
  *   IDLE        — Stream status panel (left, collapsible) + readiness message
  *   CAPTURING   — Session ribbon (LIVE dot, elapsed, drill badge, stop)
  *               — Two card sections: Behavioral Metrics | Physiological Data
- *               — VirTra event ticker (in footer)
  *   RESULTS     — Cards freeze, final computed metrics overwrite live values
  *               — Confirm / Discard panel appears after a successful auto-save
  *
@@ -33,10 +32,6 @@ LabReview.LiveIntelPage = (function () {
 
   let _state = 'IDLE';   // IDLE | CAPTURING | SUMMARIZING | RESULTS
 
-  // Participant / session identity (pre-filled from topbar or LSL stream)
-  let _participantId = '';
-  let _sessionName = '';
-
   // Drill resolved by Backend from the VirTra scenario name
   let _drillKey = '';
   let _drillLabel = '';
@@ -49,22 +44,23 @@ LabReview.LiveIntelPage = (function () {
   let _roundRequestIds = new Map();
   let _liveRoundPhysio = new Map();
   let _roundNames = {};
-  let _finalFittsMetrics = null;
-  let _fittsActiveKey = '';
-  let _fittsActiveCards = null;
-  let _fittsFinalCards = null;
-  let _fittsHistoryEntries = new Map();
+  let _finalAssessmentMetrics = null;
+  let _assessmentActiveKey = '';
+  let _assessmentActiveCards = null;
+  let _assessmentFinalCards = null;
+  let _assessmentHistoryEntries = new Map();
   let _scenarioPayload = null;
   let _sessionId = '';
   let _captureStatus = 'complete';
   let _scoringNotice = '';
 
   function _isRoundAssessment() {
-    return !!_scenarioPayload?.assessment_profile && _runSource === 'custom';
+    return _runSource === 'custom' &&
+      !!LabReview.AAR.Standardized.assessmentProfile(_scenarioPayload);
   }
 
   function _assessmentMetricType() {
-    return _scenarioPayload?.assessment_profile === 'pvt_fitts_core' ? 'PVT_FITTS' : _taskType;
+    return LabReview.AAR.Standardized.assessmentProfile(_scenarioPayload)?.metricSet;
   }
 
   // Elapsed time tracking (RAF-based for smooth display)
@@ -92,12 +88,6 @@ LabReview.LiveIntelPage = (function () {
     LabReview.EventBus.on('scenario-started', _onScenarioStarted);
     LabReview.EventBus.on('scenario-stopped', _onScenarioStopped);
     LabReview.EventBus.on('scenario-context-updated', _onScenarioContextUpdated);
-    LabReview.EventBus.on('scoring-waiting', msg => {
-      if ((msg.scenario_name || '').toLowerCase() === 'fitts-pvt_clay') return;
-      if (_runSource === 'custom' && _drillKey === 'fitts_pvt_clay') return;
-      _scoringNotice = `Waiting for Custom metrics: ${msg.scenario_name || 'scenario'}`;
-      _refreshStatusDot();
-    });
     LabReview.EventBus.on('scoring-unavailable', msg => {
       _scoringNotice = `Custom metrics unavailable: ${msg.scenario_name || 'scenario'}`;
       _refreshStatusDot();
@@ -130,9 +120,6 @@ LabReview.LiveIntelPage = (function () {
 
     // LSL catalog → update stream status panel
     LabReview.EventBus.on('catalog-updated', _onCatalogUpdated);
-
-    // Auto-fill participant / session from LSL Participant stream
-    LabReview.EventBus.on('session-info-received', _onSessionInfoReceived);
 
     // DB responses
     LabReview.EventBus.on('db-participants-list', _onParticipantsList);
@@ -251,7 +238,6 @@ LabReview.LiveIntelPage = (function () {
             <div class="li-round-section" id="li-round-section" style="display:none">
               <div class="li-round-final" id="li-round-final" style="display:none"></div>
               <div class="li-round-current" id="li-round-current"></div>
-              <p class="li-round-between" id="li-round-between" style="display:none"></p>
               <div class="li-round-history" id="li-round-history"></div>
               <datalist id="li-round-name-list"></datalist>
             </div>
@@ -360,7 +346,6 @@ LabReview.LiveIntelPage = (function () {
   // ── Capture control ───────────────────────────────────────────────────────
 
   function _startCapture(alreadyStarted = false) {
-    LabReview.StreamRouter.subscribeAll();
     if (!alreadyStarted) LabReview.StreamRouter.activateLive();
 
     _elapsedAtAnchor = 0;
@@ -386,15 +371,6 @@ LabReview.LiveIntelPage = (function () {
     _streamCatalog = catalog || [];
     _renderStreamList();
     _refreshStatusDot();
-    if (_streamCatalog.length > 0) {
-      LabReview.StreamRouter.subscribeAll();
-    }
-  }
-
-  function _onSessionInfoReceived({ participant_id, session_name }) {
-    // Store internally so the save panel can pre-fill from LSL data
-    if (!_participantId && participant_id) _participantId = participant_id;
-    if (!_sessionName && session_name) _sessionName = session_name;
   }
 
   function _onSessionState(msg) {
@@ -444,11 +420,11 @@ LabReview.LiveIntelPage = (function () {
     }
     _rounds = (Array.isArray(payload.rounds) ? payload.rounds : [])
       .map(round => _mergeRound(round));
-    _finalFittsMetrics = null;
-    _fittsActiveKey = '';
-    _fittsActiveCards = null;
-    _fittsFinalCards = null;
-    _fittsHistoryEntries = new Map();
+    _finalAssessmentMetrics = null;
+    _assessmentActiveKey = '';
+    _assessmentActiveCards = null;
+    _assessmentFinalCards = null;
+    _assessmentHistoryEntries = new Map();
     document.getElementById('li-round-history')?.replaceChildren();
     document.getElementById('li-round-final')?.replaceChildren();
     _renderRounds();
@@ -463,7 +439,7 @@ LabReview.LiveIntelPage = (function () {
 
       // Tell AAR Dashboard which drill is active (for charts)
       _mountAARDashboard();
-      if (_drillKey !== 'fitts_pvt_clay') _activeDisplay?.onScenarioStarted?.(payload);
+      if (!_isRoundAssessment()) _activeDisplay?.onScenarioStarted?.(payload);
     }
   }
 
@@ -486,7 +462,7 @@ LabReview.LiveIntelPage = (function () {
       for (const round of msg.rounds) if (_roundId(round)) _roundStore.set(_roundId(round), round);
       _rounds = msg.rounds.map(round => _mergeRound(round));
     }
-    if (_isRoundAssessment()) _finalFittsMetrics = msg.error ? null : msg.metrics || null;
+    if (_isRoundAssessment()) _finalAssessmentMetrics = msg.error ? null : msg.metrics || null;
     // Overwrite live card values with the final computed metrics from Analysis
     const metrics = msg.metrics || msg;
     if (msg.metrics) LabReview.MetricCardRenderer.updateAllCards(metrics, 'trial');
@@ -618,24 +594,27 @@ LabReview.LiveIntelPage = (function () {
     const id = _roundId(round);
     _roundStore.set(id, round);
     const index = _rounds.findIndex(item => _roundId(item) === id);
-    if (index >= 0) _rounds[index] = _mergeRound(_rounds[index]);
-    else _rounds.push(_mergeRound(round));
+    const updated = _mergeRound(index >= 0 ? _rounds[index] : round);
+    if (index >= 0) _rounds[index] = updated;
+    else _rounds.push(updated);
     const key = _roundKey(round);
-    const entry = _fittsHistoryEntries.get(key);
+    const entry = _assessmentHistoryEntries.get(key);
     const wasOpen = !!entry?.details.open;
     if (entry) {
       entry.details.remove();
-      _fittsHistoryEntries.delete(key);
+      _assessmentHistoryEntries.delete(key);
     }
-    if (_fittsActiveKey === key) {
+    if (_assessmentActiveKey === key) {
       const assignment = document.querySelector('#li-round-current .li-round-assignment');
       if (assignment && document.activeElement !== assignment.querySelector('input')) {
-        assignment.outerHTML = _roundParticipant(_rounds[index]);
-        _wireFittsParticipant(document.getElementById('li-round-current'));
+        assignment.outerHTML = _roundParticipant(updated);
+        _wireAssessmentParticipant(document.getElementById('li-round-current'));
       }
     }
     _renderRounds();
-    if (wasOpen) _fittsHistoryEntries.get(key).details.open = true;
+    if (wasOpen && _assessmentHistoryEntries.has(key)) {
+      _assessmentHistoryEntries.get(key).details.open = true;
+    }
   }
 
   function _onAssessmentRoundPhysiology(message) {
@@ -656,9 +635,9 @@ LabReview.LiveIntelPage = (function () {
       if (message.round_id) {
         _setRoundError(message.round_id, message.error || 'Could not save this round.');
         _roundRequestIds.delete(message.round_id);
-        const entry = _fittsHistoryEntries.get(_roundKey(_rounds.find(item =>
+        const entry = _assessmentHistoryEntries.get(_roundKey(_rounds.find(item =>
           _roundId(item) === message.round_id) || {}));
-        if (entry) { entry.details.remove(); _fittsHistoryEntries.delete(entry.details.dataset.roundKey); }
+        if (entry) { entry.details.remove(); _assessmentHistoryEntries.delete(entry.details.dataset.roundKey); }
         const status = document.querySelector('#li-round-current .li-round-save-status');
         if (status) status.textContent = message.error || 'Could not save this round.';
         _renderRounds();
@@ -697,7 +676,7 @@ LabReview.LiveIntelPage = (function () {
   }
 
   function _pulseLiveEvent() {
-    if (_isRoundAssessment()) _fittsActiveCards?.flashVisible();
+    if (_isRoundAssessment()) _assessmentActiveCards?.flashVisible();
   }
 
   function _metricTiles(metrics) {
@@ -725,13 +704,7 @@ LabReview.LiveIntelPage = (function () {
   function _roundDifficulty(round) {
     if (!_isRoundAssessment()) return '';
     const settings = round.settings || {};
-    const fields = [
-      ['Distance', 'active_distance_meters', 'm'],
-      ['Visibility', 'active_visibility_duration_seconds', 's'],
-      ['Spawn interval', 'active_spawn_interval_seconds', 's'],
-      ['Targets', 'active_targets_per_round', ''],
-      ['Concurrent', 'active_concurrent_targets', ''],
-    ];
+    const fields = LabReview.AAR.Standardized.assessmentProfile(_scenarioPayload).settings;
     const values = fields.filter(([, key]) => settings[key] != null)
       .map(([label, key, unit]) => `<div><dt>${_escHtml(label)}</dt><dd>${_escHtml(settings[key])}${unit}</dd></div>`);
     const preset = round.preset_mixed ? 'Mixed presets' : (round.preset_label || 'Not reported');
@@ -763,7 +736,7 @@ LabReview.LiveIntelPage = (function () {
       </span></label><span class="li-round-save-status ${saved ? 'is-saved' : ''}">${_escHtml(status)}</span></div>`;
   }
 
-  function _wireFittsParticipant(container) {
+  function _wireAssessmentParticipant(container) {
     const input = container.querySelector('.li-round-participant-input');
     if (!input) return;
     input.addEventListener('input', () => {
@@ -833,27 +806,25 @@ LabReview.LiveIntelPage = (function () {
     const physiology = round.ended_at == null
       ? (_liveRoundPhysio.get(_roundId(round)) || round.physiology || {})
       : (round.physiology || _liveRoundPhysio.get(_roundId(round)) || {});
-    const quality = round.quality || {};
-    const display = (value, unit, digits = 1) => value == null ? '—' :
-      `${Number(value).toFixed(digits)} ${unit}`;
-    const values = [
-      ['Heart Rate', display(physiology.hr_mean_bpm, 'bpm'), physiology.hr_n_samples],
-      ['HRV RMSSD', display(physiology.hrv_rmssd_ms, 'ms'), physiology.hrv_n_intervals],
-      ['Pupil Diameter', display(physiology.pupil_mean_mm, 'mm', 2),
-        Math.min(physiology.pupil_l_n || 0, physiology.pupil_r_n || 0)],
-    ];
-    return `<h3>Physiological Data <small>${_escHtml(quality.physiology_status ||
-      (round.ended_at == null ? 'Live round' : 'Finalizing'))}</small></h3>
-      <div class="li-round-physiology__grid">${values.map(([label, value, count]) =>
-        `<div class="li-round-physiology__item"><span>${label}</span><strong>${value}</strong>
-        <small>${count || 0} samples</small></div>`).join('')}</div>`;
+    return `<h3 class="aar-section-label">Physiological Data</h3>
+      <div class="aar-grid">${LabReview.AAR.Standardized.physiology.map(def => {
+        const count = def.sampleFields
+          ? Math.min(...def.sampleFields.map(field => physiology[field] || 0))
+          : physiology[def.sampleField] || 0;
+        const value = LabReview.AAR.Standardized.display(physiology[def.field], def.unit);
+        return `<div class="aar-card"><div class="aar-card-value">${_escHtml(value)}</div>
+        <div class="aar-card-label">${_escHtml(def.label)}</div>
+        <div class="aar-card-sub">${count} samples</div>
+        <button class="aar-info-btn" type="button" aria-label="${_escHtml(def.label)}: ${_escHtml(def.description)}"
+          data-tip="${_escHtml(def.description)}">i</button></div>`;
+      }).join('')}</div>`;
   }
 
-  function _fittsRoundTitle(round) {
+  function _assessmentRoundTitle(round) {
     return `Round ${round.round_number}${round.attempt > 1 ? ` · Attempt ${round.attempt}` : ''}`;
   }
 
-  function deriveFittsView(rounds, state, finalMetrics) {
+  function deriveAssessmentView(rounds, state, finalMetrics) {
     const rows = Array.isArray(rounds) ? rounds : [];
     const current = state === 'CAPTURING' ? rows.find(round => round.ended_at == null) || null : null;
     const ended = rows.filter(round => round.ended_at != null);
@@ -868,75 +839,58 @@ LabReview.LiveIntelPage = (function () {
     };
   }
 
-  function _roundMetricNote(round) {
-    const metrics = round.metrics || {};
-    const notes = [];
-    if (metrics.rt_count === 0) {
-      notes.push(metrics.total_shots_fired
-        ? 'No response time was attributable to a target.'
-        : 'Response times require an attributable shot.');
-    } else if (metrics.rt_count === 1) {
-      notes.push('Response time standard deviation requires two responses.');
-    }
-    if (round.ended_at != null) {
-      if (metrics.unresolved_trials > 0) {
-        notes.push(`${metrics.unresolved_trials} target presentation${metrics.unresolved_trials === 1 ? '' : 's'} unresolved; response and omission rates are unavailable.`);
-      }
-      if (metrics.total_shots_fired > 0 && metrics.shot_misses == null) {
-        notes.push('Shot misses are unavailable because some shot outcomes were not reported.');
-      }
-      if (metrics.total_shots_fired === 0) {
-        notes.push('Hit accuracy requires a fired shot.');
-      }
-    }
-    return notes.join(' ');
-  }
-
-  function _renderFittsRounds(section, currentEl, historyEl) {
+  function _renderAssessmentRounds(section, currentEl, historyEl) {
     const finalEl = document.getElementById('li-round-final');
-    const betweenEl = document.getElementById('li-round-between');
-    const { current, ended, count, showBetween, showFinal, showFinalCards } =
-      deriveFittsView(_rounds, _state, _finalFittsMetrics);
+    const { current, ended, count, showFinal, showFinalCards } =
+      deriveAssessmentView(_rounds, _state, _finalAssessmentMetrics);
     section.classList.add('li-round-section--standard');
-    section.style.display = _rounds.length || _state === 'SUMMARIZING' || _state === 'RESULTS' ? '' : 'none';
+    section.style.display = _state === 'CAPTURING' || _rounds.length ||
+      _state === 'SUMMARIZING' || _state === 'RESULTS' ? '' : 'none';
 
     if (current) {
       const key = _roundKey(current);
-      if (_fittsActiveKey !== key) {
-        _fittsActiveKey = key;
-        currentEl.innerHTML = `<div class="li-round-head"><h2>${_escHtml(_fittsRoundTitle(current))}</h2></div>` +
+      if (_assessmentActiveKey !== key) {
+        _assessmentActiveKey = key;
+        currentEl.innerHTML = `<details class="li-round-active" open>` +
+          `<summary></summary><div class="li-round-detail-body">` +
           `<div class="li-round-meta"></div>${_roundParticipant(current)}` +
-          `<div class="li-round-card-host"></div><p class="li-round-live-note"></p>` +
-          `<section class="li-round-physiology"></section>`;
-        _wireFittsParticipant(currentEl);
-        _fittsActiveCards = LabReview.AAR.Standardized.createMetricCards(_assessmentMetricType(), 'round');
-        _fittsActiveCards.mount(currentEl.querySelector('.li-round-card-host'), current.metrics);
+          `<div class="li-round-card-host"></div>` +
+          `<section class="li-round-physiology"></section></div></details>`;
+        _wireAssessmentParticipant(currentEl);
+        _assessmentActiveCards = LabReview.AAR.Standardized.createMetricCards(_assessmentMetricType(), 'round');
+        _assessmentActiveCards.mount(currentEl.querySelector('.li-round-card-host'), current.metrics);
       }
+      const preset = current.preset_mixed ? 'Mixed presets' : current.preset_label || 'Preset not reported';
+      currentEl.querySelector('summary').textContent =
+        `${_assessmentRoundTitle(current)} · live · ${preset}`;
       currentEl.querySelector('.li-round-meta').innerHTML = _roundDifficulty(current);
-      const pending = current.metrics?.pending_presentations || 0;
-      const pendingShots = current.metrics?.pending_shots || 0;
-      currentEl.querySelector('.li-round-live-note').textContent =
-        pending || pendingShots
-          ? `Live values · ${pending} open target${pending === 1 ? '' : 's'} · ${pendingShots} shot${pendingShots === 1 ? '' : 's'} awaiting result`
-          : 'Live values update as events arrive.';
-      const metricNote = _roundMetricNote(current);
-      if (metricNote) currentEl.querySelector('.li-round-live-note').textContent += ` ${metricNote}`;
       currentEl.querySelector('.li-round-physiology').innerHTML = _physiologyContent(current);
-      _fittsActiveCards.update(current.metrics);
+      _assessmentActiveCards.update(current.metrics);
       currentEl.style.display = '';
     } else {
-      if (_fittsActiveKey) currentEl.replaceChildren();
-      _fittsActiveKey = '';
-      _fittsActiveCards = null;
-      currentEl.style.display = 'none';
+      if (_state === 'CAPTURING') {
+        if (_assessmentActiveKey || !currentEl.querySelector('.li-round-waiting')) {
+          currentEl.innerHTML = `<div class="li-round-waiting" role="status">` +
+            `<div class="li-round-head"><h2>Current round</h2></div>` +
+            `<p></p></div>`;
+        }
+        currentEl.querySelector('.li-round-waiting p').textContent = ended.length
+          ? 'Waiting for next round' : 'Waiting for first round';
+        currentEl.style.display = '';
+      } else {
+        if (_assessmentActiveKey) currentEl.replaceChildren();
+        currentEl.style.display = 'none';
+      }
+      _assessmentActiveKey = '';
+      _assessmentActiveCards = null;
     }
 
-    if (ended.length && !_fittsHistoryEntries.size) {
+    if (ended.length && !_assessmentHistoryEntries.size) {
       historyEl.innerHTML = '<h3>Previous rounds</h3>';
     }
     for (const round of ended) {
       const key = _roundKey(round);
-      let entry = _fittsHistoryEntries.get(key);
+      let entry = _assessmentHistoryEntries.get(key);
       if (!entry) {
         const details = document.createElement('details');
         details.className = 'li-round-previous';
@@ -944,44 +898,42 @@ LabReview.LiveIntelPage = (function () {
         details.open = round.ended_reason === 'completed' && round.save_status !== 'saved';
         details.innerHTML = `<summary></summary><div class="li-round-detail-body">` +
           `<div class="li-round-meta"></div>${_roundParticipant(round)}` +
-          `<div class="li-round-card-host"></div><p class="li-round-metric-note"></p>` +
+          `<div class="li-round-card-host"></div>` +
           `<section class="li-round-physiology"></section></div>`;
         historyEl.appendChild(details);
         const cards = LabReview.AAR.Standardized.createMetricCards(_assessmentMetricType(), 'round');
         cards.mount(details.querySelector('.li-round-card-host'), round.metrics);
-        _wireFittsParticipant(details);
+        _wireAssessmentParticipant(details);
         entry = { details, cards };
-        _fittsHistoryEntries.set(key, entry);
+        _assessmentHistoryEntries.set(key, entry);
       }
       const preset = round.preset_mixed ? 'Mixed presets' : round.preset_label || 'Preset not reported';
       entry.details.querySelector('summary').textContent =
-        `${_fittsRoundTitle(round)} · ${round.ended_reason || 'incomplete'} · ${preset}`;
+        `${_assessmentRoundTitle(round)} · ${round.ended_reason || 'incomplete'} · ${preset}`;
       entry.details.querySelector('.li-round-meta').innerHTML = _roundDifficulty(round);
-      entry.details.querySelector('.li-round-metric-note').textContent = _roundMetricNote(round);
       entry.details.querySelector('.li-round-physiology').innerHTML = _physiologyContent(round);
       entry.cards.update(round.metrics);
     }
     historyEl.style.display = ended.length ? '' : 'none';
 
-    if (betweenEl) {
-      betweenEl.textContent = 'Waiting for next round';
-      betweenEl.style.display = showBetween ? '' : 'none';
-    }
     if (finalEl) {
       finalEl.style.display = showFinal ? '' : 'none';
       if (showFinalCards) {
-        if (!_fittsFinalCards) {
-          finalEl.innerHTML = '<div class="li-round-head"><h2>Grand Total / Average</h2></div>' +
-            '<p class="li-round-final-context"></p><div class="li-round-card-host"></div>';
-          _fittsFinalCards = LabReview.AAR.Standardized.createMetricCards(_assessmentMetricType(), 'run');
-          _fittsFinalCards.mount(finalEl.querySelector('.li-round-card-host'), _finalFittsMetrics);
+        if (!_assessmentFinalCards) {
+          finalEl.innerHTML = '<details class="li-round-summary" open>' +
+            '<summary>Grand Total / Average</summary><div class="li-round-detail-body">' +
+            '<p class="li-round-final-context"></p><div class="li-round-card-host"></div>' +
+            '</div></details>';
+          _assessmentFinalCards = LabReview.AAR.Standardized.createMetricCards(_assessmentMetricType(), 'run');
+          _assessmentFinalCards.mount(finalEl.querySelector('.li-round-card-host'), _finalAssessmentMetrics);
         }
-        const partial = _finalFittsMetrics.scoring_status === 'partial_attribution';
+        const partial = _finalAssessmentMetrics.scoring_status === 'partial_attribution';
         finalEl.querySelector('.li-round-final-context').textContent =
           `${count} completed ${count === 1 ? 'round' : 'rounds'} · Session aggregate${partial ? ' · Partial shot attribution' : ''}`;
-        _fittsFinalCards.update(_finalFittsMetrics);
+        _assessmentFinalCards.update(_finalAssessmentMetrics);
       } else if (showFinal) {
-        finalEl.textContent = 'No scored completed rounds to summarize.';
+        finalEl.innerHTML = '<div class="li-round-head"><h2>Grand Total / Average</h2></div>' +
+          '<p class="li-round-final-context">No scored completed rounds to summarize.</p>';
       }
     }
     const list = document.getElementById('li-round-name-list');
@@ -994,7 +946,7 @@ LabReview.LiveIntelPage = (function () {
     const historyEl = document.getElementById('li-round-history');
     if (!section || !currentEl || !historyEl) return;
     if (_isRoundAssessment() && _runSource === 'custom') {
-      _renderFittsRounds(section, currentEl, historyEl);
+      _renderAssessmentRounds(section, currentEl, historyEl);
       return;
     }
     section.classList.remove('li-round-section--standard');
@@ -1203,7 +1155,7 @@ LabReview.LiveIntelPage = (function () {
     const panel = document.getElementById('li-save-panel');
     if (!panel) return;
     if (msg.success) {
-      const confirmation = _drillKey === 'fitts_pvt_clay'
+      const confirmation = _isRoundAssessment()
         ? 'Round participants confirmed.'
         : `Session confirmed for <strong>${_escHtml(msg.participant_name)}</strong>.`;
       panel.innerHTML = `
@@ -1415,17 +1367,15 @@ LabReview.LiveIntelPage = (function () {
     _roundRequestIds = new Map();
     _liveRoundPhysio = new Map();
     _roundNames = {};
-    _finalFittsMetrics = null;
-    _fittsActiveKey = '';
-    _fittsActiveCards = null;
-    _fittsFinalCards = null;
-    _fittsHistoryEntries = new Map();
+    _finalAssessmentMetrics = null;
+    _assessmentActiveKey = '';
+    _assessmentActiveCards = null;
+    _assessmentFinalCards = null;
+    _assessmentHistoryEntries = new Map();
     _scenarioPayload = null;
     _sessionId = '';
     _captureStatus = 'complete';
     _scoringNotice = '';
-    _participantId = '';
-    _sessionName = '';
     _activeDisplay?.reset?.();
     _activeDisplay = null;
 
@@ -1453,6 +1403,6 @@ LabReview.LiveIntelPage = (function () {
     _activeDisplay?.unmount?.();
   }
 
-  return { init, deriveFittsView };
+  return { init, deriveAssessmentView };
 
 })();

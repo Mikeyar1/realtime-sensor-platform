@@ -31,7 +31,7 @@ from api.message_types import (
     MSG_DB_DISCARD_SESSION, MSG_DB_UPDATE_PARTICIPANT,
     MSG_DB_PARTICIPANTS_LIST, MSG_DB_SESSION_SAVED,
     MSG_DB_SESSION_DISCARDED, MSG_DB_PARTICIPANT_UPDATED,
-    MSG_PERF_QUERY, MSG_PERF_RESULT, MSG_PERF_DELETE_SESSION,
+    MSG_PERF_QUERY, MSG_PERF_RESULT, MSG_PERF_DELETE_SESSION, MSG_PERF_DELETE_ROUND,
     MSG_PERF_DELETE_PARTICIPANT, MSG_PERF_DELETE_RESULT,
 )
 from .virtra_scenario_orchestrator import VirTraScenarioOrchestrator
@@ -118,6 +118,11 @@ def _db_get_session_detail(session_uuid: str, participant_name: str,
 def _db_delete_history_session(session_uuid: str, participant_name: str) -> bool:
     from services.database import delete_history_session  # type: ignore
     return delete_history_session(session_uuid, participant_name)
+
+
+def _db_delete_history_round(round_id: int, participant_name: str) -> bool:
+    from services.database import delete_history_round  # type: ignore
+    return delete_history_round(round_id, participant_name)
 
 
 def _db_delete_participant_history(participant_name: str) -> int:
@@ -242,7 +247,8 @@ class SessionLifecycleCoordinator:
                 "session": detail,
             })
 
-        elif msg_type in (MSG_PERF_DELETE_SESSION, MSG_PERF_DELETE_PARTICIPANT):
+        elif msg_type in (MSG_PERF_DELETE_SESSION, MSG_PERF_DELETE_ROUND,
+                          MSG_PERF_DELETE_PARTICIPANT):
             await self._handle_perf_delete(websocket, msg)
 
         else:
@@ -419,6 +425,7 @@ class SessionLifecycleCoordinator:
         operation = msg["type"]
         participant_name = str(msg.get("participant_name", "")).strip()
         session_uuid = str(msg.get("session_uuid", "")).strip()
+        round_id = msg.get("round_id")
         deleted_count = 0
         detail = ""
         try:
@@ -431,12 +438,21 @@ class SessionLifecycleCoordinator:
                     deleted_count = int(await self._loop.run_in_executor(
                         None, _db_delete_history_session, session_uuid, participant_name
                     ))
+            elif operation == MSG_PERF_DELETE_ROUND:
+                try:
+                    parsed_round_id = int(round_id)
+                except (TypeError, ValueError):
+                    detail = "A round ID is required."
+                else:
+                    deleted_count = int(await self._loop.run_in_executor(
+                        None, _db_delete_history_round, parsed_round_id, participant_name
+                    ))
             else:
                 deleted_count = await self._loop.run_in_executor(
                     None, _db_delete_participant_history, participant_name
                 )
             if not detail and deleted_count == 0:
-                detail = "No matching saved sessions were found."
+                detail = "No matching saved results were found."
         except Exception as exc:
             print(f"[SessionLifecycleCoordinator] History deletion error: {exc}")
             detail = str(exc)
@@ -446,6 +462,7 @@ class SessionLifecycleCoordinator:
             "operation": operation,
             "participant_name": participant_name,
             "session_uuid": session_uuid,
+            "round_id": round_id,
             "success": deleted_count > 0,
             "deleted_count": deleted_count,
             "detail": detail,

@@ -24,6 +24,7 @@ LabReview.PerfReviewPage = (function () {
   let _chartScrollPosition = 0;
   let _debounceTimer  = null;
   let _pendingDelete = false;
+  let _pendingRoundDeleteId = '';
   let _chartRedrawRAF = null;
 
   // DOM refs
@@ -96,16 +97,16 @@ LabReview.PerfReviewPage = (function () {
       { field: 'pvt.rt_max_ms', label: 'PVT Maximum RT', unit: 'ms', lowerBetter: true },
     ],
   };
-  METRIC_DEFS.fitts_pvt_clay = LabReview.AAR.Standardized.specs.PVT_FITTS.groups
-    .flatMap(([, cards]) => cards.filter(card => card.scope !== 'run'))
-    .map(card => ({ field: card.path, label: card.label, unit: card.unit,
-      lowerBetter: ['rt_', 'omission', 'miss', 'shot_miss'].some(prefix => card.path.startsWith(prefix)) }));
+  function _metricDefsFor(record) {
+    const profile = LabReview.AAR.Standardized.assessmentProfile(record);
+    return profile ? LabReview.AAR.Standardized.specs[profile.metricSet].groups
+      .flatMap(([, cards]) => cards.filter(card => card.scope !== 'run'))
+      .map(card => ({ field: card.path, label: card.label, unit: card.unit,
+        lowerBetter: ['rt_', 'omission', 'miss'].some(prefix => card.path.startsWith(prefix)) }))
+      : METRIC_DEFS[record.drill_key] || [];
+  }
 
-  const BIOSIGNAL_DEFS = [
-    { field: 'hr_mean_bpm',  label: 'Average Heart Rate', unit: 'bpm' },
-    { field: 'hrv_rmssd_ms', label: 'HRV (RMSSD)',        unit: 'ms' },
-    { field: 'pupil_mean_mm', label: 'Average Pupil Diameter', unit: 'mm' },
-  ];
+  const BIOSIGNAL_DEFS = LabReview.AAR.Standardized.physiology;
 
   // ---- Init -------------------------------------------------------------------
 
@@ -199,7 +200,7 @@ LabReview.PerfReviewPage = (function () {
         <span class="pr-table-count" id="pr-table-count"></span>
       </div>
       <div class="pr-history-actions">
-        <button type="button" class="pr-delete-participant" id="pr-delete-participant">Delete participant and sessions</button>
+        <button type="button" class="pr-delete-participant" id="pr-delete-participant">Delete participant and all results</button>
       </div>
       <div class="pr-table-scroll">
         <div id="pr-table-body" class="pr-session-list"></div>
@@ -319,6 +320,20 @@ LabReview.PerfReviewPage = (function () {
   }
 
   function _onAssessmentHistoryResult(msg) {
+    if (msg.command === 'history.round.delete') {
+      if (msg.round_id !== _pendingRoundDeleteId) return;
+      _pendingDelete = false;
+      _pendingRoundDeleteId = '';
+      if (!msg.success || msg.result !== true) {
+        _setActionStatus(msg.error || 'Could not delete the saved round.', true);
+        return;
+      }
+      _selectedAssessmentRoundId = '';
+      _setActionStatus('Round deleted.');
+      _refreshParticipants();
+      _runQuery();
+      return;
+    }
     if (msg.command === 'history.round.get') {
       if (msg.round_id !== _selectedAssessmentRoundId) return;
       if (msg.success && msg.result?.id === _selectedAssessmentRoundId) {
@@ -333,6 +348,7 @@ LabReview.PerfReviewPage = (function () {
       result_scope: 'round', round_id: row.id, session_uuid: row.run_id,
       round_number: row.round_number, round_attempt: row.attempt,
       scenario_name: row.scenario_name, drill_key: row.drill_key,
+      assessment_profile: row.assessment_profile,
       source: 'custom',
       started_at: row.started_at, stopped_at: row.ended_at,
       saved_at: row.performed_at,
@@ -351,11 +367,6 @@ LabReview.PerfReviewPage = (function () {
       (Date.parse(a.saved_at || a.date || '') || 0) -
       (Date.parse(b.saved_at || b.date || '') || 0));
     _activeIdx   = -1;
-    const deleteParticipantButton = document.getElementById('pr-delete-participant');
-    if (deleteParticipantButton) {
-      deleteParticipantButton.style.display = _allSessions.some(row => row.result_scope === 'round') ? 'none' : '';
-    }
-
     const hasResults = _allSessions.length > 0;
     const promptEl   = document.getElementById('pr-prompt');
 
@@ -399,8 +410,7 @@ LabReview.PerfReviewPage = (function () {
       if (!seen.has(key)) {
         seen.add(key);
         choices.push({ key, name: (s.scenario_name || 'Unnamed scenario') +
-          (s.scenario_name === 'Fitts-PVT_Clay' ?
-            ` · ${(s.metrics_source || s.source) === 'custom' ? 'Custom' : 'Native'}` : '') });
+          ` · ${(s.metrics_source || s.source) === 'custom' ? 'Custom' : 'Native'}` });
       }
     });
     _scenarioSelect.innerHTML = choices.map(function (choice) {
@@ -496,7 +506,7 @@ LabReview.PerfReviewPage = (function () {
         (s.result_scope === 'round' ? ' · Preset: ' + _esc(s.preset_mixed ? 'Mixed' : s.preset_label || 'Not reported') : '') + '</span>' +
         '<span class="pr-session-row__stats"><span>Duration <strong>' + _esc(dur) + '</strong></span>' +
         '<span>' + _esc(_headlineLabel(s)) + ' <strong>' + _esc(metric) + '</strong></span></span></button>' +
-        (s.result_scope === 'round' ? '' : '<button type="button" class="pr-delete-session" data-delete-idx="' + idx + '" aria-label="Delete ' + _esc(scenario) + ' session from ' + _esc(date) + '">Delete</button>') + '</div>';
+        '<button type="button" class="pr-delete-session" data-delete-idx="' + idx + '" aria-label="Delete ' + _esc(scenario) + ' result from ' + _esc(date) + '">Delete</button></div>';
     }).join('');
 
     _tableBody.querySelectorAll('.pr-session-select').forEach(function (button) {
@@ -552,7 +562,7 @@ LabReview.PerfReviewPage = (function () {
       _chartScroll.innerHTML = '<div class="pr-chart-empty">Session detail is unavailable.</div>';
       return;
     }
-    const definitions = METRIC_DEFS[session.drill_key] || [];
+    const definitions = _metricDefsFor(session);
     const metricCards = definitions.length
       ? definitions.map(def => _detailCard(def.label, _readMetric(session.metrics || {}, def.field), def.unit)).join('')
       : Object.entries(session.metrics || {}).filter(([, value]) => value != null && typeof value !== 'object')
@@ -567,19 +577,13 @@ LabReview.PerfReviewPage = (function () {
     ].filter(([, value]) => value).map(([label, value]) => _detailCard(label, value, '')).join('');
     const roundCards = (session.rounds || []).map(round => {
       const settings = round.settings || {};
-      const difficultyFields = [
-        ['Distance', 'active_distance_meters', 'm'],
-        ['Visibility', 'active_visibility_duration_seconds', 's'],
-        ['Spawn interval', 'active_spawn_interval_seconds', 's'],
-        ['Targets', 'active_targets_per_round', ''],
-        ['Concurrent', 'active_concurrent_targets', ''],
-      ];
-      const difficulty = session.drill_key === 'fitts_pvt_clay'
-        ? difficultyFields.filter(([, key]) => settings[key] != null)
+      const profile = LabReview.AAR.Standardized.assessmentProfile(session);
+      const difficulty = profile
+        ? profile.settings.filter(([, key]) => settings[key] != null)
           .map(([label, key, unit]) => `${label}: ${settings[key]}${unit}`).join(' · ')
         : '';
       const components = Object.entries(round.components || {}).map(([name, detail]) => {
-        const cards = session.drill_key === 'fitts_pvt_clay'
+        const cards = profile
           ? METRIC_DEFS.pvt.filter(def => _readMetric(detail.metrics || {}, def.field) != null)
             .map(def => _detailCard(def.label, _readMetric(detail.metrics, def.field), def.unit))
           : Object.entries(detail.metrics || {})
@@ -609,26 +613,62 @@ LabReview.PerfReviewPage = (function () {
   }
 
   function _detailCard(label, value, unit) {
-    const shown = value == null || value === '' ? '—' : String(value) + (unit ? ' ' + unit : '');
+    const shown = _detailValue(value, unit);
     return `<div class="pr-detail-card"><span>${_esc(label)}</span><strong>${_esc(shown)}</strong></div>`;
+  }
+
+  function _detailValue(value, unit = '') {
+    if (value == null || value === '') return '—';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) return '—';
+      return LabReview.AAR.Standardized.display(value, unit);
+    }
+    if (typeof value === 'string') return value + (unit ? ` ${unit}` : '');
+    if (Array.isArray(value)) return value.map(item => _detailValue(item)).join(', ');
+    return '—';
+  }
+
+  function _roundSettingCards(round) {
+    const settings = round.settings || {};
+    const profile = LabReview.AAR.Standardized.assessmentProfile(round);
+    if (profile) {
+      return profile.settings.filter(([, key]) => settings[key] != null)
+        .map(([label, key, unit]) => _detailCard(label, settings[key], unit)).join('');
+    }
+    return Object.entries(settings)
+      .filter(([, value]) => value != null && typeof value !== 'object')
+      .map(([key, value]) => _detailCard(key.replace(/^active_/, '').replace(/_/g, ' '), value, '')).join('');
+  }
+
+  function _roundMetricSections(round) {
+    const profile = LabReview.AAR.Standardized.assessmentProfile(round);
+    if (profile) {
+      return LabReview.AAR.Standardized.specs[profile.metricSet].groups.map(([name, cards]) => {
+        const visible = cards.filter(def => def.scope !== 'run');
+        return `<section class="pr-detail-section"><h3>${_esc(name)}</h3><div class="pr-detail-grid">${visible.map(def =>
+          _detailCard(def.label, _readMetric(round.metrics || {}, def.path), def.unit)).join('')}</div></section>`;
+      }).join('');
+    }
+    const cards = _metricDefsFor(round).map(def =>
+      _detailCard(def.label, _readMetric(round.metrics || {}, def.field), def.unit)).join('') || '';
+    return `<section class="pr-detail-section"><h3>Behavioral results</h3><div class="pr-detail-grid">${cards || '<p>No scored metrics available.</p>'}</div></section>`;
   }
 
   function _renderAssessmentRoundDetail(round) {
     if (!_chartScroll || round.id !== _selectedAssessmentRoundId) return;
-    const metricCards = METRIC_DEFS[round.drill_key]?.map(def =>
-      _detailCard(def.label, round.metrics?.[def.field], def.unit)).join('') || '';
     const bioCards = BIOSIGNAL_DEFS.map(def =>
-      _detailCard(def.label, round.physiology?.[def.field], def.unit)).join('');
-    const settings = Object.entries(round.settings || {}).map(([key, value]) =>
-      _detailCard(key.replace(/^active_/, '').replace(/_/g, ' '), value, '')).join('');
+      _detailCard(def.label, _readBiosignal(round.physiology || {}, def.field), def.unit)).join('');
+    const settings = _roundSettingCards(round);
+    const preset = round.preset_mixed ? 'Mixed presets' : round.preset_label || 'Not reported';
+    const quality = String(round.quality?.physiology_status || 'unavailable').replace(/_/g, ' ');
     _chartScroll.innerHTML = `<div class="pr-detail">
       <button type="button" class="pr-detail-back" id="pr-detail-back">← All round trends</button>
       <h2>${_esc(round.scenario_name || 'Round')} · Round ${_esc(round.round_number)}</h2>
-      <p>Participant: ${_esc(round.participant_name || '')} · Preset: ${_esc(round.preset_label || 'Not reported')}</p>
-      <h3>Preset settings</h3><div class="pr-detail-grid">${settings}</div>
-      <h3>Behavioral results</h3><div class="pr-detail-grid">${metricCards}</div>
-      <h3>Physiological data</h3><div class="pr-detail-grid">${bioCards}</div>
-      <p>Physiology quality: ${_esc(round.quality?.physiology_status || 'unavailable')}</p></div>`;
+      <p class="pr-detail-meta">${_esc(_sessionDateTime(round))} · Participant: ${_esc(round.participant_name || 'Unassigned')} · Preset: ${_esc(preset)}</p>
+      ${settings ? `<section class="pr-detail-section"><h3>Preset settings</h3><div class="pr-detail-grid">${settings}</div></section>` : ''}
+      ${_roundMetricSections(round)}
+      <section class="pr-detail-section"><div class="pr-detail-section-heading"><h3>Physiological data</h3><span>${_esc(quality)}</span></div><div class="pr-detail-grid">${bioCards}</div></section></div>`;
     _chartScroll.scrollTop = 0;
     _chartScroll.querySelector('#pr-detail-back')?.addEventListener('click', () => {
       _selectedAssessmentRoundId = '';
@@ -640,22 +680,34 @@ LabReview.PerfReviewPage = (function () {
   }
 
   function _deleteSession(session) {
-    if (_pendingDelete || !session || !session.session_uuid) return;
+    if (_pendingDelete || !session ||
+        (!session.round_id && !session.legacy_round_id && !session.session_uuid)) return;
     const name = (_participantInput.value || '').trim();
     const description = (session.scenario_name || 'Unnamed scenario') + ' on ' + _sessionDateTime(session);
-    if (!window.confirm('Delete this saved drill session for ' + name + '?\n\n' + description + '\n\nThis also removes its saved trials and record file.')) return;
+    const kind = session.round_id || session.legacy_round_id ? 'round' : 'session';
+    if (!window.confirm('Delete this saved ' + kind + ' for ' + name + '?\n\n' + description +
+      (session.round_id ? '\n\nThis also removes its saved trial and physiology data.' :
+        session.legacy_round_id ? '\n\nThis also removes its saved trial data.' :
+        '\n\nThis also removes its saved trials and record file.'))) return;
     _pendingDelete = true;
-    _setActionStatus('Deleting session…');
-    if (!LabReview.StreamRouter.send({ type: 'perf.delete_session', participant_name: name, session_uuid: session.session_uuid })) {
+    _setActionStatus('Deleting ' + kind + '…');
+    if (session.round_id) _pendingRoundDeleteId = session.round_id;
+    const command = session.round_id
+      ? { type: 'history.round.delete', participant_name: name, round_id: session.round_id }
+      : session.legacy_round_id
+        ? { type: 'perf.delete_round', participant_name: name, round_id: session.legacy_round_id }
+        : { type: 'perf.delete_session', participant_name: name, session_uuid: session.session_uuid };
+    if (!LabReview.StreamRouter.send(command)) {
       _pendingDelete = false;
-      _setActionStatus('Connect to the backend before deleting a session.', true);
+      _pendingRoundDeleteId = '';
+      _setActionStatus('Connect to the backend before deleting a result.', true);
     }
   }
 
   function _deleteParticipant() {
     if (_pendingDelete || !_allSessions.length) return;
     const name = (_participantInput.value || '').trim();
-    if (!window.confirm('Delete participant "' + name + '" and all ' + _allSessions.length + ' saved drill sessions?\n\nThis also removes their saved trials and record files.')) return;
+    if (!window.confirm('Delete participant "' + name + '" and all ' + _allSessions.length + ' saved results?\n\nThis also removes their saved trials, physiology data, and record files.')) return;
     _pendingDelete = true;
     _setActionStatus('Deleting participant…');
     if (!LabReview.StreamRouter.send({ type: 'perf.delete_participant', participant_name: name })) {
@@ -672,7 +724,7 @@ LabReview.PerfReviewPage = (function () {
       _setActionStatus(msg.detail || 'Could not delete the saved data.', true);
       return;
     }
-    _setActionStatus(msg.deleted_count + ' session' + (msg.deleted_count === 1 ? '' : 's') + ' deleted.');
+    _setActionStatus(msg.deleted_count + ' result' + (msg.deleted_count === 1 ? '' : 's') + ' deleted.');
     _runQuery();
   }
 
@@ -724,7 +776,7 @@ LabReview.PerfReviewPage = (function () {
     }
 
     const drillKeys = [...new Set(sessions.map(s => s.drill_key))];
-    const behavDefs = drillKeys.flatMap(drillKey => (METRIC_DEFS[drillKey] || []).map(def => ({
+    const behavDefs = drillKeys.flatMap(drillKey => _metricDefsFor(sessions.find(s => s.drill_key === drillKey)).map(def => ({
       ...def, drillKey,
       label: drillKeys.length > 1 ? `${_drillDisplayName(drillKey)} · ${def.label}` : def.label,
     })));
@@ -1028,8 +1080,12 @@ LabReview.PerfReviewPage = (function () {
   function _headlineMetric(session) {
     const m = session.metrics || {};
     const d = session.drill_key || '';
+    const profile = LabReview.AAR.Standardized.assessmentProfile(session);
+    if (profile) {
+      const value = _readMetric(m, profile.headlineField);
+      return value == null ? '--' : LabReview.AAR.Standardized.display(value, '%');
+    }
     if (d === 'pvt_fitts') return String(m.completed_rounds ?? '--');
-    if (d === 'fitts_pvt_clay') return m.hits_pct == null ? '--' : Number(m.hits_pct).toFixed(1) + '%';
     const field = d === 'pvt' ? 'hits_pct' : d === 'gng' ? 'overall_accuracy_pct' :
       d === 'behavioral_discrimination' ? 'discrimination.discrimination_accuracy_pct' : '';
     const value = field ? _readMetric(m, field) : null;
@@ -1037,8 +1093,10 @@ LabReview.PerfReviewPage = (function () {
   }
 
   function _headlineLabel(session) {
+    const profile = LabReview.AAR.Standardized.assessmentProfile(session);
+    if (profile) return profile.headlineLabel;
     return session.drill_key === 'pvt' ? 'Hits' : session.drill_key === 'pvt_fitts' ? 'Rounds' :
-      session.drill_key === 'fitts_pvt_clay' ? 'Hit rate' : 'Accuracy';
+      'Accuracy';
   }
 
   function _readMetric(metrics, field) {
@@ -1075,9 +1133,11 @@ LabReview.PerfReviewPage = (function () {
     let value = biosignals[field];
     // Sessions saved before pupil_mean_mm was introduced still have both eye means.
     if (field === 'pupil_mean_mm' && value == null) {
-      const left = Number(biosignals.pupil_l_mean_mm);
-      const right = Number(biosignals.pupil_r_mean_mm);
-      if (isFinite(left) && isFinite(right)) value = (left + right) / 2;
+      const left = biosignals.pupil_l_mean_mm;
+      const right = biosignals.pupil_r_mean_mm;
+      if (left != null && right != null && isFinite(Number(left)) && isFinite(Number(right))) {
+        value = (Number(left) + Number(right)) / 2;
+      }
     }
     return value == null || !isFinite(Number(value)) ? null : Number(value);
   }
@@ -1088,7 +1148,8 @@ LabReview.PerfReviewPage = (function () {
   }
 
   function _sessionDateTime(session) {
-    const stamp = session.saved_at ? new Date(session.saved_at) : null;
+    const recordedAt = session.saved_at || session.performed_at;
+    const stamp = recordedAt ? new Date(recordedAt) : null;
     if (stamp && !isNaN(stamp.getTime())) {
       return stamp.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     }

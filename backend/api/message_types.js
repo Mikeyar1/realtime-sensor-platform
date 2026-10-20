@@ -17,6 +17,11 @@ export const MSG = Object.freeze({
   SYSTEM_GET_STATE: 'system.get_state',
   SYSTEM_PING: 'system.ping',
 
+  // Saved history
+  PERF_DELETE_SESSION: 'perf.delete_session',
+  PERF_DELETE_ROUND: 'perf.delete_round',
+  PERF_DELETE_PARTICIPANT: 'perf.delete_participant',
+
   // Server -> Client
 
   // Session state
@@ -32,6 +37,7 @@ export const MSG = Object.freeze({
   // System
   SYSTEM_PONG: 'system.pong',
   API_ERROR: 'api.error',
+  PERF_DELETE_RESULT: 'perf.delete_result',
 
   // Scenario lifecycle
   SCENARIO_STARTED: 'session.scenario_started',

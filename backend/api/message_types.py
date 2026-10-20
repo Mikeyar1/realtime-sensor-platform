@@ -56,6 +56,7 @@ MSG_DB_PARTICIPANT_UPDATED = "db.participant_updated" # {old_name, new_name, suc
 # Performance Review — Session History (Client -> Server)
 MSG_PERF_QUERY  = "perf.query"   # {participant_name, drill_key?, limit?}
 MSG_PERF_DELETE_SESSION = "perf.delete_session"  # {participant_name, session_uuid}
+MSG_PERF_DELETE_ROUND = "perf.delete_round"  # {participant_name, round_id}
 MSG_PERF_DELETE_PARTICIPANT = "perf.delete_participant"  # {participant_name}
 
 # Performance Review — Session History (Server -> Client)

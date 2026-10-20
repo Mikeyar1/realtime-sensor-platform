@@ -14,15 +14,12 @@
 
   <!-- Page CSS (feature-based) -->
   <link rel="stylesheet" href="css/pages/topbar.css?v=start-blue-2" />
-  <link rel="stylesheet" href="css/pages/live-intel.css?v=round-metrics-2" />
+  <link rel="stylesheet" href="css/pages/live-intel.css?v=round-layout-2" />
   <link rel="stylesheet" href="css/pages/perf-review.css?v=session-detail-readability-1" />
 
   <!-- AAR Dashboard -->
   <link rel="stylesheet" href="js/features/aar/aar-dashboard.css?v=fitts-cards-2" />
 
-  <!-- ES module preloads — shared utilities (imported by app.js) -->
-  <link rel="modulepreload" href="js/shared/constants.js" />
-  <link rel="modulepreload" href="js/shared/format.js" />
 </head>
 
 <body>
@@ -98,31 +95,28 @@
   <!-- Scripts: core → pages -->
 
   <!-- Core infrastructure -->
-  <script src="js/core/plugin-registry.js"></script>
   <script src="js/core/event-bus.js"></script>
-  <script src="js/core/stream-router.js?v=round-metrics-2"></script>
-  <script src="js/core/mode-manager.js"></script>
+  <script src="js/core/stream-router.js?v=frontend-refactor-1"></script>
   <script src="js/core/sidebar.js?v=main-screen-1"></script>
   <script src="js/core/topbar-manager.js"></script>
 
-  <!-- AAR Dashboard: router + task-type display modules -->
-  <!-- To add a new task type: create task-types/<name>.js and add one line here -->
-  <script src="js/features/aar/standardized.js?v=round-metrics-2"></script>
+  <!-- AAR Dashboard: shared metric definitions and task display -->
+  <script src="js/features/aar/standardized.js?v=frontend-refactor-1"></script>
   <script src="js/features/aar/aar-dashboard.js"></script>
 
   <!-- Config: stream display registry + drill metric card registry -->
-  <script src="js/config/stream_catalog.js"></script>
+  <script src="js/config/stream_catalog.js?v=frontend-refactor-1"></script>
   <script src="js/config/drill_metrics.js"></script>
 
   <!-- Shared: metric card renderer -->
   <script src="js/shared/metric-card-renderer.js?v=live-flash-1"></script>
 
   <!-- Page controllers -->
-  <script src="js/pages/live-intel.js?v=round-metrics-2"></script>
-  <script src="js/pages/perf-review.js?v=round-physio-1"></script>
+  <script src="js/pages/live-intel.js?v=frontend-refactor-1"></script>
+  <script src="js/pages/perf-review.js?v=frontend-refactor-1"></script>
 
   <!-- App bootstrap (must be last; type=module defers automatically) -->
-  <script type="module" src="js/app.js?v=main-screen-1"></script>
+  <script type="module" src="js/app.js?v=frontend-refactor-1"></script>
 
 </body>
 
