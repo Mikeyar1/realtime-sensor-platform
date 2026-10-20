@@ -1,0 +1,19 @@
+schema_version = 1
+
+[scenario]
+id = "pvt"
+revision = 1
+
+[drills.pvt]
+metrics_source = "native"
+canonical_key = "pvt"
+label = "PVT"
+task_type = "PVT"
+metric_module = "pvt"
+default_component = "pvt"
+
+[drills.pvt.components.pvt]
+label = "PVT"
+phase_values = []
+metric_set = "PVT"
+scoring_status = "implemented"

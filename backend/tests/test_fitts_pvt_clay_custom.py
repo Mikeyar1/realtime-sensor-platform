@@ -48,9 +48,9 @@ def native_source_config():
     with tempfile.TemporaryDirectory() as folder:
         path = Path(folder) / "virtra_streams.toml"
         current = VirtraStreamConfig().path.read_text(encoding="utf-8")
-        path.write_text(current.replace(
-            '[drills.fitts_pvt_clay]\nmetrics_source = "custom"',
-            '[drills.fitts_pvt_clay]\nmetrics_source = "native"'), encoding="utf-8")
+        path.write_text(current +
+                        '\n[drills.fitts_pvt_clay]\nmetrics_source = "native"\n',
+                        encoding="utf-8")
         with patch.dict(os.environ, {"LABREVIEW_VIRTRA_STREAMS_CONFIG": str(path)}):
             yield
 

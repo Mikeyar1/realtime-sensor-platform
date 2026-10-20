@@ -53,7 +53,10 @@ class CustomLslRoundsTest(unittest.TestCase):
         _validate(migrated)
         self.assertNotIn("source_selection", migrated)
         self.assertEqual(migrated["drills"]["pvt_fitts"]["metrics_source"], "native")
-        self.assertEqual(len(migrated["drills"]["pvt_fitts"]["native_scenarios"]), 2)
+        self.assertEqual(migrated["drills"]["pvt_fitts"]["native_scenarios"],
+                         ["LVL1_PVT_FITTS_ASSESSMENT"])
+        self.assertEqual(migrated["drills"]["basepvt_fitts_clay"]["native_scenarios"],
+                         ["basePVT_Fitts_Clay"])
 
     def test_pvt_fitts_requires_real_custom_contract_before_source_flip(self):
         config = VirtraStreamConfig()
@@ -64,10 +67,7 @@ class CustomLslRoundsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             candidate = Path(folder) / "virtra_streams.toml"
             contents = config.path.read_text(encoding="utf-8")
-            contents = contents.replace(
-                '[drills.pvt_fitts]\nmetrics_source = "native"',
-                '[drills.pvt_fitts]\nmetrics_source = "custom"',
-            )
+            contents += '\n[drills.basepvt_fitts_clay]\nmetrics_source = "custom"\n'
             self.assertNotEqual(contents, config.path.read_text(encoding="utf-8"))
             candidate.write_text(contents, encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "before its components are implemented"):

@@ -117,28 +117,29 @@ class FittsPvtClayTracker(CustomLslSessionBase):
         data = event.data
         name = event.event_name
         target = data.get("target")
-        if name == "Target Appeared":
+        if self.event_matches("trial_start", name, "Target Appeared"):
             self._open_trial(data, event)
-        elif name == "Shot Fired":
+        elif self.event_matches("shot_fired", name, "Shot Fired"):
             shot = data.get("shot") if isinstance(data.get("shot"), dict) else data
             self._upsert_shot(shot, event)
             self._record_shot(shot, event)
-        elif name == "Shot Hit" and event.reason == "shot_hit":
+        elif self.event_matches("shot_hit", name, "Shot Hit") and event.reason == "shot_hit":
             shot = data.get("shot")
             self._upsert_shot(shot, event, "hit")
             if isinstance(shot, dict) and shot.get("counted_as_first_target_hit") is True:
                 self._close_target(shot.get("target"), "hit", event,
                                    _number(shot.get("reaction_time_seconds")))
-        elif name == "Target Timed Out" and isinstance(target, dict):
+        elif self.event_matches("trial_timeout", name, "Target Timed Out") and isinstance(target, dict):
             self._close_target(target, "timeout", event, None)
-        elif name == "Shot Missed":
+        elif self.event_matches("shot_miss", name, "Shot Missed"):
             shot = data.get("shot") if isinstance(data.get("shot"), dict) else data
             self._upsert_shot(shot, event, "miss")
             self._record_shot(shot, event)
         self._refresh_live_metrics()
         if "pvt_fitts" in self._round_open.components:
             script_metrics = data.get("metrics")
-            if not isinstance(script_metrics, dict) and name == "Metrics Updated":
+            if not isinstance(script_metrics, dict) and self.event_matches(
+                    "script_metrics", name, "Metrics Updated"):
                 script_metrics = data
             if isinstance(script_metrics, dict):
                 self._round_open.components["pvt_fitts"]["script_metrics"] = dict(script_metrics)

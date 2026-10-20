@@ -91,6 +91,8 @@ class CustomLslSessionBase:
         self._default_component: str = ""
         self._component_events: dict[str, str] = {}
         self._script_metric_events: set[str] = set()
+        self._drill_events: dict[str, set[str]] = {}
+        self._component_drill_events: dict[str, dict[str, set[str]]] = {}
         self._pending_preset = ""
         self._default_preset = ""
         self._default_settings: dict = {}
@@ -105,6 +107,17 @@ class CustomLslSessionBase:
         if lifecycle:
             self._lifecycle = {key: set(values) for key, values in lifecycle.items()}
         self._default_component = drill.get("default_component", "")
+        self._drill_events = {
+            key: {str(name).casefold() for name in names}
+            for key, names in drill.get("events", {}).items()
+        }
+        self._component_drill_events = {
+            component: {
+                key: {str(name).casefold() for name in names}
+                for key, names in spec.get("events", {}).items()
+            }
+            for component, spec in drill.get("components", {}).items()
+        }
         self._default_preset = str(drill.get("default_preset_label") or "")
         self._default_settings = dict(drill.get("default_settings") or {})
         self._component_map = {
@@ -127,6 +140,17 @@ class CustomLslSessionBase:
             str(value).casefold()
             for spec in drill.get("components", {}).values()
             for value in spec.get("events", {}).get("script_metrics", []))
+
+    def event_matches(self, key: str, event_name: str, default: str) -> bool:
+        """Use the scenario's event names, or the legacy default if unconfigured."""
+        component_events = self._component_drill_events.get(self.component, {})
+        if key in component_events:
+            names = component_events[key]
+        elif key in self._drill_events:
+            names = self._drill_events[key]
+        else:
+            names = {default.casefold()}
+        return event_name.casefold() in names
 
     def rounds_snapshot(self) -> list[dict]:
         rows = [asdict(record) for record in self.round_history]

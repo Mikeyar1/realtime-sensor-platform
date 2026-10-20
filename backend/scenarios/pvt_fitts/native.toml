@@ -1,0 +1,10 @@
+schema_version = 1
+
+[source]
+kind = "native"
+
+[drills.pvt_fitts]
+native_metadata_formats = ["pairs_v1"]
+native_adapter = "PVT"
+native_result_key = "pvt"
+native_scenarios = ["LVL1_PVT_FITTS_ASSESSMENT"]

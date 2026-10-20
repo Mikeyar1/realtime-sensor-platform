@@ -1,0 +1,15 @@
+schema_version = 1
+
+[source]
+kind = "native"
+
+[drills.fitts_pvt_clay]
+native_metadata_formats = ["pairs_v1"]
+native_adapter = "PVT"
+native_result_key = "pvt"
+native_scenarios = ["Fitts-PVT_Clay"]
+
+[drills.fitts_pvt_clay.native_params]
+# Native comparison mode: "neutral" is the fixation target, while the
+# stimulus targets are named "neutral_0", "neutral_1", and so on.
+valid_targets = ["neutral_"]

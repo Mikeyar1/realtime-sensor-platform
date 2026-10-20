@@ -14,7 +14,6 @@ No changes needed here.
 """
 
 import asyncio
-import json
 import os
 import re
 import sys
@@ -28,7 +27,8 @@ from .drill_definition_registry import DrillDefinitionRegistry
 from .biosignal_rolling_monitor import BiosignalRollingMonitor
 from .analysis_service_client import AnalysisServiceClient
 from cognitive_attributes import ATTRIBUTE_REGISTRY
-from virtra_custom_lsl.event_decoder import CustomLslEvent, decode_custom_lsl_sample
+from event_decoders.custom_lsl import CustomLslEvent, decode_custom_lsl_sample
+from event_decoders.native_virtra import decode_native_lsl_sample, parse_native_metadata
 from virtra_custom_lsl.session import CustomLslSessionBase
 from assessments.catalog import CATEGORIES, DRILLS
 from assessments.events import EventKind, normalize_custom_event
@@ -67,14 +67,9 @@ def _parse_metadata_field(metadata_str: str, field_key: str) -> Optional[str]:
     """
     if not metadata_str:
         return None
-    try:
-        pairs = json.loads(metadata_str)
-        for pair in pairs:
-            if isinstance(pair, list) and len(pair) == 2:
-                if pair[0] == field_key:
-                    return str(pair[1])
-    except (json.JSONDecodeError, TypeError):
-        pass
+    metadata, _ = parse_native_metadata(metadata_str)
+    if field_key in metadata:
+        return str(metadata[field_key])
 
     # Fallback regex extraction for double-quoted CSV variant
     pattern = rf'\[?"?"?{re.escape(field_key)}"?"?\s*,\s*"?"?([^"\]]+)"?"?\]?'
@@ -213,25 +208,16 @@ class VirTraScenarioOrchestrator:
         if source != "native" or len(data) < 1:
             return
 
-        event_type = str(data[0]).strip() if len(data) > 0 else ""
-        description = str(data[1]).strip() if len(data) > 1 else ""
-        category = str(data[2]).strip() if len(data) > 2 else ""
-        metadata_raw = str(data[3]).strip() if len(data) > 3 else ""
-
-        if not event_type:
+        decoded = decode_native_lsl_sample(data)
+        if decoded is None:
             return
+        event_type = decoded.event_name
+        description = decoded.description
+        category = decoded.category
+        metadata_raw = decoded.metadata_raw
+        metadata_dict = decoded.metadata
 
         print(f"[VirTraScenarioOrchestrator] VirTra > {event_type!r}  |  {description[:80]}")
-
-        # Parse metadata
-        metadata_dict: dict = {}
-        if metadata_raw:
-            try:
-                pairs = json.loads(metadata_raw)
-                if isinstance(pairs, list):
-                    metadata_dict = {p[0]: p[1] for p in pairs if isinstance(p, list) and len(p) == 2}
-            except (json.JSONDecodeError, TypeError):
-                pass
 
         # Scenario lifecycle
         if event_type == "Scenario Started":
@@ -275,7 +261,10 @@ class VirTraScenarioOrchestrator:
             "Target Activated", "Target Deactivated", "Target Removed",
             "Shot Fired", "Shot Hit", "Unscored Hit", "Shot Miss",
         )
-        if self._active_tracker is not None and event_type in _TRIAL_EVENTS:
+        policy = self._active_drill.get("stream_policy", {})
+        accepted_formats = policy.get("native_metadata_formats")
+        valid_format = (not accepted_formats or decoded.metadata_format in accepted_formats)
+        if self._active_tracker is not None and event_type in _TRIAL_EVENTS and valid_format:
             self._active_tracker.on_virtra_event(event_type, timestamp, metadata_dict)
 
         # Broadcast every raw VirTra event to clients unconditionally

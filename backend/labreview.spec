@@ -44,9 +44,10 @@ a = Analysis(
         # Backend runtime config (editable by operator)
         (str(BACKEND_DIR / "config.toml"),               "."),
 
-        # Drill/scenario registry (editable — no rebuild needed when adding scenarios)
+        # Shared registry, stream policy, and bundled scenario contracts.
         (str(PROJECT_ROOT / "config" / "drill_registry.toml"), "config"),
         (str(PROJECT_ROOT / "config" / "virtra_streams.toml"), "config"),
+        (str(BACKEND_DIR / "scenarios"),                "scenarios"),
 
         # Frontend — served by the embedded HTTP server at runtime
         (str(PROJECT_ROOT / "frontend"),                 "frontend"),

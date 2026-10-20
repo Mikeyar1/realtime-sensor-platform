@@ -117,6 +117,8 @@ class DrillDefinitionRegistry:
                     **native_meta,
                     "scenario_name": alias,
                     "task_type": native_task,
+                    "params": {**native_meta["params"],
+                               **stream_drill.get("native_params", {})},
                     "metrics_source": "native",
                     "stream_policy": stream_drill,
                 }

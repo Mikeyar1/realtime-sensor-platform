@@ -1,0 +1,22 @@
+schema_version = 1
+
+[source]
+kind = "custom"
+
+[drills.multicolor_gng]
+custom_drill_types = ["multicolor_gng", "GNG_ClayColors"]
+
+[drills.multicolor_gng.events]
+trial_start = ["Target Appeared"]
+shot_fired = ["Shot Fired"]
+shot_hit = ["Shot Hit"]
+shot_miss = ["Shot Missed"]
+trial_timeout = ["Target Timed Out"]
+script_metrics = ["Metrics Updated"]
+
+[drills.multicolor_gng.fields]
+target_id = ["data.target_id", "data.target.target_id", "data.entity_id"]
+shot_id = ["data.shot_id", "data.shot.shot_id"]
+expected_action = ["data.expected_action", "data.target.expected_action"]
+result = ["data.gng_classification", "data.classification"]
+script_metrics = ["data.metrics"]

@@ -1,0 +1,8 @@
+schema_version = 1
+
+[source]
+kind = "native"
+
+[drills.snake_drill]
+native_metadata_formats = ["pairs_v1"]
+native_scenarios = ["Snake Drill"]

@@ -1,0 +1,10 @@
+schema_version = 1
+
+[source]
+kind = "native"
+
+[drills.basepvt_fitts_clay]
+native_metadata_formats = ["pairs_v1"]
+native_adapter = "PVT"
+native_result_key = "pvt"
+native_scenarios = ["basePVT_Fitts_Clay"]

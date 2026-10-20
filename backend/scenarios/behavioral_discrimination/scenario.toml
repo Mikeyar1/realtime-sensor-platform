@@ -1,0 +1,25 @@
+schema_version = 1
+
+[scenario]
+id = "behavioral_discrimination"
+revision = 1
+
+[drills.behavioral_discrimination]
+metrics_source = "native"
+canonical_key = "behavioral_discrimination"
+label = "Behavioral Discrimination"
+task_type = "DISCRIMINATION"
+metric_module = "discrimination"
+default_component = "discrimination"
+
+[drills.behavioral_discrimination.components.pvt]
+label = "PVT"
+phase_values = []              # native tracker infers this from target names
+metric_set = "PVT"
+scoring_status = "implemented"
+
+[drills.behavioral_discrimination.components.discrimination]
+label = "Discrimination"
+phase_values = []              # native tracker infers this from target names
+metric_set = "DISCRIMINATION"
+scoring_status = "implemented"

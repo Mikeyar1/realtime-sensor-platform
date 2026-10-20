@@ -140,15 +140,15 @@ class MulticolorGngTracker(CustomLslSessionBase):
     # has already handled scenario/round lifecycle bookkeeping.
 
     def on_drill_event(self, event: CustomLslEvent) -> None:
-        if event.event_name == "Target Appeared":
+        if self.event_matches("trial_start", event.event_name, "Target Appeared"):
             self._on_target_appeared(event)
-        elif event.event_name == "Shot Fired":
+        elif self.event_matches("shot_fired", event.event_name, "Shot Fired"):
             self._on_shot_fired(event)
-        elif event.event_name == "Shot Hit":
+        elif self.event_matches("shot_hit", event.event_name, "Shot Hit"):
             self._on_shot_hit(event)
-        elif event.event_name == "Target Timed Out":
+        elif self.event_matches("trial_timeout", event.event_name, "Target Timed Out"):
             self._on_target_timed_out(event)
-        elif event.event_name == "Shot Missed":
+        elif self.event_matches("shot_miss", event.event_name, "Shot Missed"):
             self._on_shot_missed(event)
 
     def on_scenario_stopped(self, event: CustomLslEvent) -> None:

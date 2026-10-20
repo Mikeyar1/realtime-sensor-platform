@@ -33,6 +33,93 @@ def default_config_path() -> Path:
     return Path(__file__).resolve().parents[2] / "config" / "virtra_streams.toml"
 
 
+def default_scenarios_path() -> Path:
+    """Find the bundled scenario contracts, or an explicit operator copy."""
+    override = os.environ.get("LABREVIEW_SCENARIOS_CONFIG_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "scenarios"
+    return Path(__file__).resolve().parents[1] / "scenarios"
+
+
+def _merge_tables(base: dict, overrides: dict) -> dict:
+    """Merge explicit operator overrides without deleting scenario defaults."""
+    merged = copy.deepcopy(base)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_tables(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
+def _partition_legacy_native_aliases(drills: dict) -> None:
+    """Keep old operator files readable after one native alias became one folder."""
+    for old_key, new_key, alias in (
+            ("pvt", "snake_drill", "Snake Drill"),
+            ("behavioral_discrimination", "drill_3b", "Drill 3B"),
+            ("pvt_fitts", "basepvt_fitts_clay", "basePVT_Fitts_Clay")):
+        old = drills.get(old_key)
+        if not isinstance(old, dict) or "native_scenarios" not in old:
+            continue
+        names = old["native_scenarios"]
+        if not isinstance(names, list):
+            continue  # The normal validator reports the malformed value.
+        moved = [name for name in names if isinstance(name, str) and
+                 name.casefold().strip() == alias.casefold()]
+        if not moved:
+            continue
+        old["native_scenarios"] = [name for name in names if name not in moved]
+        target = drills.setdefault(new_key, {})
+        target["native_scenarios"] = list(dict.fromkeys(
+            target.get("native_scenarios", []) + moved))
+        if "metrics_source" in old and "metrics_source" not in target:
+            target["metrics_source"] = old["metrics_source"]
+
+
+def _load_scenario_drills(root: Path) -> dict:
+    """Load exactly one versioned drill definition from each scenario folder."""
+    if not root.is_dir():
+        raise ValueError(f"scenario config directory does not exist: {root}")
+    definitions: dict = {}
+    for path in sorted(root.glob("*/scenario.toml")):
+        with path.open("rb") as handle:
+            candidate = tomllib.load(handle)
+        scenario = candidate.get("scenario")
+        if candidate.get("schema_version") != 1 or not isinstance(scenario, dict):
+            raise ValueError(f"{path} requires schema_version = 1 and [scenario]")
+        name = scenario.get("id")
+        revision = scenario.get("revision")
+        if name != path.parent.name or not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
+            raise ValueError(f"{path} has an invalid scenario id or revision")
+        drills = candidate.get("drills")
+        if not isinstance(drills, dict) or set(drills) != {name}:
+            raise ValueError(f"{path} must define exactly [drills.{name}]")
+        if name in definitions:
+            raise ValueError(f"duplicate scenario id {name!r}")
+        definition = copy.deepcopy(drills[name])
+        for kind in ("native", "custom"):
+            source_path = path.parent / f"{kind}.toml"
+            if not source_path.exists():
+                continue
+            with source_path.open("rb") as handle:
+                source_config = tomllib.load(handle)
+            if (source_config.get("schema_version") != 1 or
+                    source_config.get("source") != {"kind": kind} or
+                    not isinstance(source_config.get("drills"), dict) or
+                    set(source_config["drills"]) != {name}):
+                raise ValueError(f"{source_path} has an invalid {kind} source contract")
+            definition = _merge_tables(definition, source_config["drills"][name])
+        definition.setdefault("native_scenarios", [])
+        definition.setdefault("custom_drill_types", [])
+        definitions[name] = {**definition, "scenario_id": name,
+                             "scenario_revision": revision}
+    if not definitions:
+        raise ValueError(f"no scenario configs found in {root}")
+    return definitions
+
+
 def _strings(value: Any, label: str) -> list[str]:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise ValueError(f"{label} must be a list of strings")
@@ -85,8 +172,13 @@ def _upgrade_v1(data: dict) -> dict:
              if alias.casefold() in aliases]
     pvt["native_scenarios"] = [alias for alias in pvt.get("native_scenarios", [])
                                 if alias.casefold() not in aliases]
-    pvt_fitts["native_scenarios"] = list(dict.fromkeys(
-        pvt_fitts.get("native_scenarios", []) + moved))
+    combined = list(dict.fromkeys(pvt_fitts.get("native_scenarios", []) + moved))
+    pvt_fitts["native_scenarios"] = [alias for alias in combined
+                                     if alias.casefold() != "basepvt_fitts_clay"]
+    base_pvt_fitts = drills.setdefault("basepvt_fitts_clay", {})
+    base_pvt_fitts["native_scenarios"] = list(dict.fromkeys(
+        base_pvt_fitts.get("native_scenarios", []) +
+        [alias for alias in combined if alias.casefold() == "basepvt_fitts_clay"]))
     return upgraded
 
 
@@ -164,6 +256,12 @@ def _validate(data: dict) -> None:
                 raise ValueError(f"duplicate or empty native scenario {alias!r}")
             native_aliases.add(key)
         aliases = _strings(drill.get("custom_drill_types"), f"drills.{name}.custom_drill_types")
+        if not isinstance(drill.get("native_params", {}), dict):
+            raise ValueError(f"drills.{name}.native_params must be a table")
+        formats = _strings(drill.get("native_metadata_formats", []),
+                           f"drills.{name}.native_metadata_formats")
+        if not set(formats) <= {"pairs_v1", "object_v1", "empty"}:
+            raise ValueError(f"drills.{name}.native_metadata_formats has an unknown format")
         if source == "native" and not drill["native_scenarios"]:
             raise ValueError(f"drills.{name} enables native scoring without scenarios")
         if source == "custom" and not aliases:
@@ -214,8 +312,11 @@ def _validate(data: dict) -> None:
 class VirtraStreamConfig:
     """Validated policy with helpers for stream, drill, phase, and field lookup."""
 
-    def __init__(self, path: str | Path | None = None):
+    def __init__(self, path: str | Path | None = None,
+                 scenarios_path: str | Path | None = None):
         self.path = Path(path) if path is not None else default_config_path()
+        self.scenarios_path = (Path(scenarios_path) if scenarios_path is not None
+                               else default_scenarios_path())
         self._data: dict = {}
         self.reload()
 
@@ -224,6 +325,11 @@ class VirtraStreamConfig:
             candidate = tomllib.load(handle)
         if candidate.get("schema_version") == 1:
             candidate = _upgrade_v1(candidate)
+        _partition_legacy_native_aliases(candidate.setdefault("drills", {}))
+        # A legacy operator file may still contain complete [drills.*] tables.
+        # New files can override only the keys they intend to change.
+        candidate["drills"] = _merge_tables(
+            _load_scenario_drills(self.scenarios_path), candidate.get("drills", {}))
         _validate(candidate)
         self._data = candidate
 

@@ -1,0 +1,25 @@
+schema_version = 1
+
+[scenario]
+id = "basepvt_fitts_clay"
+revision = 1
+
+[drills.basepvt_fitts_clay]
+metrics_source = "native"
+canonical_key = "pvt_fitts"
+label = "PVT / Fitts"
+task_type = "PVT_FITTS"
+metric_module = ""
+default_component = "pvt"
+
+[drills.basepvt_fitts_clay.components.pvt]
+label = "PVT"
+phase_values = ["pvt"]
+metric_set = "PVT"
+scoring_status = "pending_stream"
+
+[drills.basepvt_fitts_clay.components.fitts]
+label = "Fitts"
+phase_values = ["fitts"]         # edit if VirTra emits another phase value
+metric_set = "FITTS"
+scoring_status = "pending_stream"
