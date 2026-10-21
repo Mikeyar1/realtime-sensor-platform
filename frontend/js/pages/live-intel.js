@@ -88,10 +88,6 @@ LabReview.LiveIntelPage = (function () {
     LabReview.EventBus.on('scenario-started', _onScenarioStarted);
     LabReview.EventBus.on('scenario-stopped', _onScenarioStopped);
     LabReview.EventBus.on('scenario-context-updated', _onScenarioContextUpdated);
-    LabReview.EventBus.on('scoring-unavailable', msg => {
-      _scoringNotice = `Custom metrics unavailable: ${msg.scenario_name || 'scenario'}`;
-      _refreshStatusDot();
-    });
 
     // Raw VirTra events → AAR dashboard (event counting etc.)
     LabReview.EventBus.on('virtra-event', _onVirtraEvent);
