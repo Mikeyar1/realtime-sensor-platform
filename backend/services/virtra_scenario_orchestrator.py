@@ -810,12 +810,7 @@ class VirTraScenarioOrchestrator:
                     self._handle_custom_lsl_scenario_stopped(timestamp, event)
             return
         if self._waiting_for_custom:
-            scenario_name = self._waiting_for_custom
             self._waiting_for_custom = ""
-            asyncio.run_coroutine_threadsafe(self._broadcast({
-                "type": "session.scoring_unavailable", "scenario_name": scenario_name,
-                "metrics_source": "custom",
-            }), self._loop)
             return
         # If no registered session was ever started, ignore the stop event
         if self._active_drill is None:

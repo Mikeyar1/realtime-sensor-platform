@@ -436,6 +436,36 @@ class FittsPvtClayCustomTest(unittest.TestCase):
         with custom_source_config():
             asyncio.run(run())
 
+    def test_native_stop_waits_silently_for_later_custom_stream(self):
+        async def run():
+            messages = []
+            async def send(message):
+                messages.append(message)
+            orchestrator = VirTraScenarioOrchestrator(
+                inlets={}, broadcast_fn=send, send_fn=send,
+                get_state_payload_fn=lambda: {}, error_fn=lambda *args: {},
+                on_live_activate_fn=lambda: None, on_live_deactivate_fn=lambda: None,
+                loop=asyncio.get_running_loop())
+            native = json.dumps([["Scenario", "Fitts-PVT_Clay"]])
+            orchestrator.on_sample("V_300", "VirTraEvents", 1,
+                                   ["Scenario Started", "", "", native])
+            orchestrator.on_sample("V_300", "VirTraEvents", 2,
+                                   ["Scenario Stopped", "", "", native])
+            await asyncio.sleep(.01)
+            self.assertFalse(any(message.get("type") == "session.scoring_unavailable"
+                                 for message in messages))
+            orchestrator.on_sample("virtra_lsl", "VirTra Events", 3,
+                                   sample("Round Started", "round_started", 1,
+                                          {"settings": {"active_distance_meters": 10}}, 1,
+                                          drill_type="fitts_pvt"))
+            await asyncio.sleep(.01)
+            self.assertEqual(orchestrator._run_source, "custom")
+            self.assertEqual(orchestrator._active_custom_drill["drill_key"], "fitts_pvt_clay")
+            self.assertEqual(len([message for message in messages
+                                  if message.get("type") == "session.scenario_started"]), 1)
+        with custom_source_config():
+            asyncio.run(run())
+
     def test_matched_native_outcome_updates_custom_round_projection(self):
         async def run():
             messages = []
