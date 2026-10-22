@@ -23,7 +23,8 @@ from typing import Callable, Optional
 from pylsl import local_clock
 
 from .drill_definition_registry import DrillDefinitionRegistry
-from .biosignal_rolling_monitor import BiosignalRollingMonitor
+from physiology.service import PhysiologyService
+from physiology.catalog import projection as physiology_projection
 from .analysis_service_client import AnalysisServiceClient
 from trial_models.registry import tracker_for
 from event_decoders.custom_lsl import CustomLslEvent, decode_custom_lsl_sample
@@ -32,7 +33,6 @@ from virtra_custom_lsl.session import CustomLslSessionBase
 from assessments.catalog import CATEGORIES, DRILLS
 from assessments.events import EventKind, normalize_custom_event
 from .round_assessment_service import RoundAssessmentService
-from .round_physiology_capture import RoundPhysiologyCapture
 from . import round_repository
 
 # Native VirTra machine stream: name "V_300", type "VirTraEvents".
@@ -154,11 +154,12 @@ class VirTraScenarioOrchestrator:
         self._custom_simulator_system: str = ""
         self._event_lock = threading.RLock()
         self._round_assessments = RoundAssessmentService()
-        self._round_physiology = RoundPhysiologyCapture()
+        self._physiology = PhysiologyService(broadcast_fn, loop)
+        self._round_physiology = self._physiology.rounds
         self._last_physio_preview_at = float("-inf")
 
         # Biosignal rolling monitor
-        self._biosignals = BiosignalRollingMonitor(broadcast_fn=broadcast_fn, loop=loop)
+        self._biosignals = self._physiology.session
 
         # Analysis / metrics client (now calls metrics directly, no HTTP)
         self._analysis_client = AnalysisServiceClient(broadcast_fn=broadcast_fn, loop=loop)
@@ -166,7 +167,7 @@ class VirTraScenarioOrchestrator:
     # ── Sample routing ────────────────────────────────────────────────────────
 
     def on_sample(self, stream_name: str, stream_type: str, timestamp: float, data: list,
-                  *, source_event=None):
+                  *, source_event=None, source_id: str = "", outlet_uid: str = ""):
         """Called for every LSL sample from any stream."""
         if source_event is not None and source_event.status != "decoded":
             return source_event.status
@@ -181,20 +182,12 @@ class VirTraScenarioOrchestrator:
             self._handle_participant_info_sample(data)
             return
 
-        # 1. Biosignal streams
-        if signal_type in ("hr", "heartrate") or signal_name.endswith(("hr", "heartrate")):
-            self._biosignals.handle_hr_sample(timestamp, data)
-            self._capture_round_physiology("hr", stream_name, stream_type, timestamp, data)
-            return
-        if (signal_type in ("ppi", "ppinterval", "rrinterval", "ibi")
-                or signal_name.endswith(("ppi", "ppinterval", "rrinterval", "ibi"))):
-            self._biosignals.handle_ppi_sample(timestamp, data)
-            self._capture_round_physiology("ppi", stream_name, stream_type, timestamp, data)
-            return
-        if (signal_type in ("gaze", "neongaze")
-                or ("gaze" in signal_name and ("neon" in signal_name or "pupil" in signal_name))):
-            self._biosignals.handle_gaze_sample(timestamp, data)
-            self._capture_round_physiology("gaze", stream_name, stream_type, timestamp, data)
+        # 1. Physiology sources share a registry and one normalized observation.
+        recognized, preview = self._physiology.ingest(
+            stream_name, stream_type, timestamp, data,
+            source_id=source_id, outlet_uid=outlet_uid)
+        if recognized:
+            self._capture_round_physiology(preview, timestamp)
             return
         if _SPEECH_TYPE_PATTERN.search(stream_type) or _SPEECH_TYPE_PATTERN.search(stream_name):
             self._handle_speech_sample(timestamp, data)
@@ -443,9 +436,7 @@ class VirTraScenarioOrchestrator:
                 "round": persisted,
             }), self._loop)
 
-    def _capture_round_physiology(self, signal, stream_name, stream_type, timestamp, data):
-        preview = self._round_physiology.ingest(
-            signal, f"{stream_name}:{stream_type}", timestamp, data)
+    def _capture_round_physiology(self, preview, timestamp):
         if (preview and self._active_custom_session is not None and
                 timestamp - self._last_physio_preview_at >= 0.25):
             self._last_physio_preview_at = timestamp
@@ -526,7 +517,7 @@ class VirTraScenarioOrchestrator:
                 key: drill_info.get(key) for key in
                 ("scenario_id", "scenario_revision", "selected_metric_ids", "cognitive_skills")
             })
-        self._biosignals.reset(record_session=drill_info["drill_key"] not in DRILLS)
+        self._biosignals.reset()
         if self._native_context:
             self._match_native_context(timestamp)
 
@@ -541,6 +532,8 @@ class VirTraScenarioOrchestrator:
             "drill_key":     drill_info["drill_key"],
             "drill_label":   drill_info["label"],
             "task_type":     task_type,
+            "selected_metric_ids": drill_info.get("selected_metric_ids", []),
+            "cognitive_skills": drill_info.get("cognitive_skills", []),
             "category_id": (DRILLS[drill_info["drill_key"]].category_id
                             if drill_info["drill_key"] in DRILLS else ""),
             "assessment_profile": (
@@ -589,6 +582,12 @@ class VirTraScenarioOrchestrator:
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
 
         biosignals = self._biosignals.snapshot_biosignals()
+        if biosignals:
+            biosignals["_assessment"] = physiology_projection(
+                biosignals, self._biosignals.snapshot_quality())
+        final_physiology = self._biosignals.final_payload()
+        if final_physiology:
+            asyncio.run_coroutine_threadsafe(self._broadcast(final_physiology), self._loop)
         session_record = self._active_custom_session.get_session_record(
             scenario_name=scenario_name,
             session_id=session_id,
@@ -786,6 +785,8 @@ class VirTraScenarioOrchestrator:
             "drill_key":        drill_info["drill_key"],
             "drill_label":      drill_info["label"],
             "task_type":        drill_info["task_type"],
+            "selected_metric_ids": drill_info.get("selected_metric_ids", []),
+            "cognitive_skills": drill_info.get("cognitive_skills", []),
             "targets":          drill_info.get("targets", {}),
             "tracked_events":   self._registry.all_tracked_events_for(drill_info["drill_key"]),
             "simulator":        self._simulator,
@@ -862,33 +863,14 @@ class VirTraScenarioOrchestrator:
 
         # Take physiological snapshot (full-session averages, not rolling window)
         biosignals = self._biosignals.snapshot_biosignals()
-
-        # Broadcast final session-average biosignals to the frontend so the
-        # physio cards update to true session means at scenario end.
         if biosignals:
-            final_biosignal_msg: dict = {"type": "session.biosignal_update", "is_final": True}
-            if "hr_mean_bpm" in biosignals:
-                final_biosignal_msg["hr"] = {
-                    "mean":   biosignals["hr_mean_bpm"],
-                    "latest": biosignals["hr_mean_bpm"],
-                    "n":      biosignals.get("hr_n_samples", 0),
-                }
-            if "hrv_rmssd_ms" in biosignals:
-                final_biosignal_msg["hrv"] = {
-                    "rmssd_ms":    biosignals["hrv_rmssd_ms"],
-                    "n_intervals": biosignals.get("hrv_n_intervals", 0),
-                }
-            if "pupil_l_mean_mm" in biosignals and "pupil_r_mean_mm" in biosignals:
-                pl = biosignals["pupil_l_mean_mm"]
-                pr = biosignals["pupil_r_mean_mm"]
-                final_biosignal_msg["pupil"] = {
-                    "left_mean_mm":  pl,
-                    "right_mean_mm": pr,
-                    "mean_mm":       round((pl + pr) / 2, 3),
-                    "n":             biosignals.get("pupil_l_n", 0),
-                }
-            asyncio.run_coroutine_threadsafe(self._broadcast(final_biosignal_msg), self._loop)
-            print(f"[VirTraScenarioOrchestrator] Broadcast final biosignal averages: {biosignals}")
+            biosignals["_assessment"] = physiology_projection(
+                biosignals, self._biosignals.snapshot_quality())
+
+        # Final session values use the same projection for both stream types.
+        final_physiology = self._biosignals.final_payload()
+        if final_physiology:
+            asyncio.run_coroutine_threadsafe(self._broadcast(final_physiology), self._loop)
 
         # Build session record using the active tracker (if any)
         session_record = None

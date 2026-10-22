@@ -48,6 +48,7 @@ a = Analysis(
         (str(PROJECT_ROOT / "config" / "drill_registry.toml"), "config"),
         (str(PROJECT_ROOT / "config" / "virtra_streams.toml"), "config"),
         (str(BACKEND_DIR / "scenarios"),                "scenarios"),
+        (str(BACKEND_DIR / "physiology" / "sources.toml"), "physiology"),
 
         # Frontend — served by the embedded HTTP server at runtime
         (str(PROJECT_ROOT / "frontend"),                 "frontend"),

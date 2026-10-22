@@ -12,6 +12,7 @@ import tomllib
 from typing import Optional
 
 from trial_models.registry import TRIAL_ADAPTERS
+from cognitive_skills.catalog import selected_for_skills
 from .virtra_stream_config import VirtraStreamConfig
 
 
@@ -56,8 +57,9 @@ class DrillDefinitionRegistry:
                         "params": dict(drill.get("native_params", {})),
                         "targets": dict(drill.get("native_targets", {})),
                         "tracked_events": list(drill.get("tracked_events", [])),
-                        "selected_metric_ids": list(drill.get(
-                            "native_selected_metric_ids", drill.get("selected_metric_ids", []))),
+                        "selected_metric_ids": selected_for_skills(
+                            list(drill.get("native_selected_metric_ids", drill.get("selected_metric_ids", []))),
+                            list(drill.get("cognitive_skills", [])), adapter),
                         "cognitive_skills": list(drill.get("cognitive_skills", [])),
                         "metrics_source": source, "stream_policy": drill,
                     }
@@ -74,7 +76,9 @@ class DrillDefinitionRegistry:
                         "trial_adapter": adapter, "custom_lsl_type": alias,
                         "params": dict(drill.get("custom_params", {})),
                         "targets": dict(drill.get("custom_targets", {})),
-                        "selected_metric_ids": list(drill.get("selected_metric_ids", [])),
+                        "selected_metric_ids": selected_for_skills(
+                            list(drill.get("selected_metric_ids", [])),
+                            list(drill.get("cognitive_skills", [])), adapter),
                         "cognitive_skills": list(drill.get("cognitive_skills", [])),
                         "metrics_source": source, "stream_policy": drill,
                     }

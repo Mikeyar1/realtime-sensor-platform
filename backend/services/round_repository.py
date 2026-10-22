@@ -11,6 +11,7 @@ import datetime as dt
 import json
 import sqlite3
 import uuid
+import zlib
 from pathlib import Path
 
 from . import database
@@ -89,6 +90,16 @@ CREATE TABLE IF NOT EXISTS assessment_physiology_samples (
 );
 CREATE INDEX IF NOT EXISTS idx_assessment_physiology_round
     ON assessment_physiology_samples(round_id, signal, lsl_timestamp);
+CREATE TABLE IF NOT EXISTS assessment_signal_chunks (
+    id INTEGER PRIMARY KEY,
+    round_id TEXT NOT NULL REFERENCES assessment_rounds(id) ON DELETE CASCADE,
+    first_timestamp REAL NOT NULL,
+    last_timestamp REAL NOT NULL,
+    sample_count INTEGER NOT NULL,
+    payload BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_assessment_signal_chunks_round
+    ON assessment_signal_chunks(round_id, first_timestamp);
 CREATE TABLE IF NOT EXISTS assessment_command_receipts (
     request_id TEXT PRIMARY KEY,
     result_json TEXT NOT NULL,
@@ -282,12 +293,35 @@ def append_physiology_samples(round_id: str, rows: list[tuple]) -> int:
             return conn.total_changes - before
 
 
+def append_signal_chunk(round_id: str, observations: list) -> int:
+    """Persist a bounded, compressed batch with source and receive timestamps."""
+    if not observations:
+        return 0
+    rows = [{"signal": item.signal, "source_key": item.source_key,
+             "lsl_timestamp": item.lsl_timestamp, "received_at": item.received_at,
+             "value": item.value, "value_2": item.value_2, "unit": item.unit,
+             "decoder_version": item.decoder_version} for item in observations]
+    payload = zlib.compress(json.dumps(rows, separators=(",", ":")).encode("utf-8"))
+    with database._lock:
+        with database._connect() as conn:
+            conn.execute("""INSERT INTO assessment_signal_chunks
+                (round_id, first_timestamp, last_timestamp, sample_count, payload)
+                VALUES (?, ?, ?, ?, ?)""",
+                (round_id, min(item.lsl_timestamp for item in observations),
+                 max(item.lsl_timestamp for item in observations), len(rows), payload))
+    return len(rows)
+
+
 def get_physiology_samples(round_id: str) -> list[dict]:
     with database._lock:
         with database._connect() as conn:
-            return [dict(row) for row in conn.execute("""SELECT signal, source_key,
+            rows = [dict(row) for row in conn.execute("""SELECT signal, source_key,
                 lsl_timestamp, value, value_2 FROM assessment_physiology_samples
                 WHERE round_id = ? ORDER BY signal, lsl_timestamp, id""", (round_id,))]
+            for item in conn.execute("""SELECT payload FROM assessment_signal_chunks
+                    WHERE round_id = ? ORDER BY first_timestamp, id""", (round_id,)):
+                rows.extend(json.loads(zlib.decompress(item["payload"])))
+            return sorted(rows, key=lambda row: (row["signal"], row["lsl_timestamp"]))
 
 
 def finalize_physiology(round_id: str, summary: dict, quality: dict) -> dict:

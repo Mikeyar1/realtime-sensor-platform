@@ -125,6 +125,11 @@ LabReview.StreamRouter = (function () {
         LabReview.EventBus.emit('assessment-round-projection', msg);
         break;
 
+      case 'assessment.catalog':
+        LabReview.AssessmentCatalog = msg;
+        LabReview.EventBus.emit('assessment-catalog', msg);
+        break;
+
       case 'assessment.command_result':
         LabReview.EventBus.emit('assessment-command-result', msg);
         break;

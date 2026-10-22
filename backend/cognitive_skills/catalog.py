@@ -47,3 +47,22 @@ METRIC_SKILL_LINKS = {
     "pvt_fitts.hit_accuracy_pct": ("shooting_performance",),
     "pvt_fitts.response_rate_pct": ("vigilance", "sustained_attention"),
 }
+
+
+ADAPTER_METRIC_PREFIXES = {
+    "native_target_response": ("pvt.",),
+    "native_threat_discrimination": ("pvt.", "discrimination."),
+    "custom_go_no_go": ("gng.",),
+    "custom_fitts_pvt": ("pvt_fitts.",),
+}
+
+
+def selected_for_skills(explicit: list[str], skills: list[str], adapter: str) -> list[str]:
+    """Inherit only formulas supported by this scenario's trial adapter."""
+    prefixes = ADAPTER_METRIC_PREFIXES.get(adapter, ())
+    result = list(explicit)
+    for metric_id, links in METRIC_SKILL_LINKS.items():
+        if (metric_id not in result and metric_id.startswith(prefixes) and
+                set(links).intersection(skills)):
+            result.append(metric_id)
+    return result

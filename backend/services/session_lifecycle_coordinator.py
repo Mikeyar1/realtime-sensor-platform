@@ -493,6 +493,8 @@ class SessionLifecycleCoordinator:
         """Send current state + stream catalog immediately upon client connection."""
         await self._send(websocket, self._state_payload())
         await self._send(websocket, self._catalog_payload())
+        from metrics.cards import catalog_payload
+        await self._send(websocket, catalog_payload())
 
         # Replay active drill state for late-joining clients
         drill_state = self._orchestrator.get_active_drill_state()
@@ -505,7 +507,8 @@ class SessionLifecycleCoordinator:
                   *, outlet_uid: str = "", source_id: str = ""):
         source = self._orchestrator._stream_config.stream_source(stream_name, stream_type)
         if source not in {"custom", "native"} or self._event_store is None:
-            return self._orchestrator.on_sample(stream_name, stream_type, timestamp, data)
+            return self._orchestrator.on_sample(stream_name, stream_type, timestamp, data,
+                                                outlet_uid=outlet_uid, source_id=source_id)
         # Sequence assignment, lifecycle routing, and link attribution must
         # share one order across native and custom worker threads for replay.
         with self._ingest_lock:
@@ -535,7 +538,8 @@ class SessionLifecycleCoordinator:
                            if source == "custom" else None)
         try:
             outcome = router.on_sample(stream_name, stream_type, timestamp, data,
-                                       source_event=event)
+                                       source_event=event, outlet_uid=outlet_uid,
+                                       source_id=source_id)
             self._event_attributor.route(
                 event_id, event, outcome, router, timestamp,
                 before_custom_run=before_custom_run,
