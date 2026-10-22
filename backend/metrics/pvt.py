@@ -1,5 +1,5 @@
 """
-cognitive_attributes/pvt/metrics.py — PVT summary metric computation.
+metrics/pvt.py — PVT summary metric computation.
 
 Consumes the trial list from PvtTracker and produces the AAR metric set for
 the Frontend. All metrics use "Response Time" (RT) — the firearm motor chain

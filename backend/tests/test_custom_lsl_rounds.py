@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cognitive_attributes.multicolor_gng.tracker import MulticolorGngTracker
+from scenarios.fitts_gng_clay_colors.custom_trials import FittsGngClayColorsTracker
 from services import database
 from services.virtra_stream_config import VirtraStreamConfig, _upgrade_v1, _validate
 from services.virtra_scenario_orchestrator import VirTraScenarioOrchestrator
@@ -24,7 +24,7 @@ class CaptureSession(CustomLslSessionBase):
         pass
 
 
-class QuietGngTracker(MulticolorGngTracker):
+class QuietGngTracker(FittsGngClayColorsTracker):
     def _broadcast_update(self, trial):
         pass
 

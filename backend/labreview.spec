@@ -58,17 +58,14 @@ a = Analysis(
 
     # Packages whose submodules are loaded dynamically (imported by string at runtime)
     hiddenimports=[
-        # cognitive_attributes are registered by name and instantiated dynamically
-        "cognitive_attributes",
-        "cognitive_attributes.pvt",
-        "cognitive_attributes.pvt.tracker",
-        "cognitive_attributes.pvt.metrics",
-        "cognitive_attributes.multicolor_gng",
-        "cognitive_attributes.multicolor_gng.tracker",
-        "cognitive_attributes.multicolor_gng.metrics",
-        "cognitive_attributes.discrimination",
-        "cognitive_attributes.discrimination.tracker",
-        "cognitive_attributes.discrimination.metrics",
+        "trial_models.registry",
+        "trial_models.native_target_response",
+        "scenarios.behavioral_discrimination.native_trials",
+        "scenarios.fitts_gng_clay_colors.custom_trials",
+        "scenarios.fitts_pvt_clay.custom_trials",
+        "metrics.registry",
+        "metrics.catalog",
+        "cognitive_skills.catalog",
 
         # websockets uses some internals that can be missed
         "websockets.legacy",

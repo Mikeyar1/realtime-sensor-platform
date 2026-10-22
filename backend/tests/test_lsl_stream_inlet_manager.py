@@ -47,7 +47,7 @@ class InletManagerTests(unittest.TestCase):
     def test_same_name_outlets_are_independent_and_reconnect(self):
         catalogs = []
         received = []
-        manager = LslStreamInletManager(lambda *args: received.append(args), catalogs.append)
+        manager = LslStreamInletManager(lambda *args, **kwargs: received.append(args), catalogs.append)
         first, second = StreamInfo("uid-1"), StreamInfo("uid-2")
         with patch("lsl.lsl_stream_inlet_manager.LslInletWorkerThread", FakeWorker), \
              patch("lsl.lsl_stream_inlet_manager.pylsl.resolve_streams") as resolve:

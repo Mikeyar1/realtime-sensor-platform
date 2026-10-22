@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cognitive_attributes.fitts_pvt_clay import FittsPvtClayTracker, compute_metrics
+from scenarios.fitts_pvt_clay.custom_trials import FittsPvtClayTracker, compute_metrics
 from services import database
 from services.drill_definition_registry import DrillDefinitionRegistry
 from services.session_lifecycle_coordinator import _db_confirm_fitts

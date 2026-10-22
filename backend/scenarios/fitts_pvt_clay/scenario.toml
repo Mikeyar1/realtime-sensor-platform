@@ -12,6 +12,9 @@ canonical_key = "fitts_pvt_clay"
 label = "Fitts-PVT Clay"
 task_type = "PVT_FITTS"
 default_component = "pvt_fitts"
+trial_adapter = "custom_fitts_pvt"
+cognitive_skills = ["vigilance", "sustained_attention", "reaction_latency", "motor_acquisition", "shooting_performance"]
+selected_metric_ids = ["pvt_fitts.total_trials", "pvt_fitts.rt_median_ms", "pvt_fitts.omission_rate_pct", "pvt_fitts.response_rate_pct", "pvt_fitts.hit_accuracy_pct"]
 
 [drills.fitts_pvt_clay.components.pvt_fitts]
 label = "Target response"

@@ -1,6 +1,6 @@
-# Shared tracker defaults and event log allowlist.
+# Shared native event allowlist.
 # Scenario aliases and source mappings live in backend/scenarios/*/.
-# Existing operator copies with legacy scenario lists remain readable.
+# Scenario targets and parameters live in backend/scenarios/*/native.toml.
 
 [shared_events]
 events = [
@@ -31,50 +31,3 @@ events = [
     # Actor State Changed → actor behavioral state transition
     "Actor State Changed",
 ]
-
-
-# ── Cognitive Attributes ──────────────────────────────────────────────────────
-
-
-[cognitive_attributes.pvt]
-label         = "PVT"
-task_type     = "PVT"                # → cognitive_attributes/pvt/tracker.py
-description   = "Sustained attention assessment — trainee responds to visual stimuli as rapidly as possible."
-
-# Target filtering for PVT.
-# valid_targets  = only these names open a trial (case-insensitive).
-#                  Empty list → accept any name not in ignore_targets.
-# ignore_targets = these names are ALWAYS skipped.
-#   Ivan       — is shot to START the drill, not a stimulus.
-#   fixation*  — fixation crosses between stimuli, not a stimulus.
-
-[cognitive_attributes.pvt.targets]
-valid_targets  = ["neutral"]
-ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)", "end_of_round_target"]
-
-# Default parameters for ALL PVT scenarios.
-# Override per-scenario with [cognitive_attributes.pvt.scenario_params."<name>"]
-[cognitive_attributes.pvt.params]
-# Lapse detection: multiplier applied to the session median RT.
-# lapse_threshold = median_rt × lapse_multiplier (e.g. 843 ms × 2.0 = 1686 ms).
-lapse_multiplier = 1.5
-
-[cognitive_attributes.behavioral_discrimination]
-label         = "Behavioral Discrimination"
-task_type     = "DISCRIMINATION"     # → cognitive_attributes/discrimination/tracker.py
-description   = "Two-phase drill: PVT vigilance block, then threat/non-threat discrimination under time pressure."
-
-
-# Threat class is read from the target name suffix (*_threat / *_nonthreat),
-# verified against Drill 3A and Drill 3B captures — no per-name list needed.
-#   Ivan      — shot to START the drill, not a stimulus.
-#   fixation* — fixation crosses between stimuli.
-[cognitive_attributes.behavioral_discrimination.targets]
-pvt_targets    = ["neutral"]
-ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)"]
-
-[cognitive_attributes.behavioral_discrimination.params]
-# ms to wait after Target Deactivated for a late impact before scoring a withhold.
-grace_window_ms  = 200
-# PVT-phase lapse threshold = median RT × this.
-lapse_multiplier = 1.5

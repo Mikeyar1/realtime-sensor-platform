@@ -10,6 +10,9 @@ canonical_key = "behavioral_discrimination"
 label = "Behavioral Discrimination"
 task_type = "DISCRIMINATION"
 default_component = "discrimination"
+trial_adapter = "native_threat_discrimination"
+cognitive_skills = ["vigilance", "sustained_attention", "reaction_latency", "behavioral_discrimination", "response_inhibition"]
+selected_metric_ids = ["pvt.rt_median_ms", "discrimination.threat_hit_rate_pct", "discrimination.false_alarm_rate_pct", "discrimination.correct_rejection_rate_pct", "discrimination.discrimination_accuracy_pct"]
 
 [drills.drill_3b.components.pvt]
 label = "PVT"

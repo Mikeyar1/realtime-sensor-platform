@@ -155,6 +155,7 @@ def init_db(db_path: str) -> None:
     """
     global _db_path
     from . import round_repository
+    from audit import event_store
     _db_path = db_path
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     with _lock:
@@ -162,6 +163,7 @@ def init_db(db_path: str) -> None:
             conn.executescript(_DDL)
             _migrate_round_columns(conn)
             round_repository.install(conn)
+            event_store.install(conn)
             conn.execute(
                 """DELETE FROM participants
                    WHERE (participant_name LIKE 'unknown_participant_%'

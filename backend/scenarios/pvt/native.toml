@@ -6,3 +6,10 @@ kind = "native"
 [drills.pvt]
 native_metadata_formats = ["pairs_v1"]
 native_scenarios = ["PVT"]
+
+[drills.pvt.native_params]
+lapse_multiplier = 1.5
+
+[drills.pvt.native_targets]
+valid_targets = ["neutral"]
+ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)", "end_of_round_target"]

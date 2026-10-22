@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from event_decoders.native_virtra import decode_native_lsl_sample
 from event_decoders.custom_lsl import CustomLslEvent
-from cognitive_attributes.fitts_pvt_clay import FittsPvtClayTracker
+from scenarios.fitts_pvt_clay.custom_trials import FittsPvtClayTracker
 from services.virtra_stream_config import (
     VirtraStreamConfig, _load_scenario_drills, _partition_legacy_native_aliases,
     _merge_tables, _validate,
@@ -42,7 +42,7 @@ class ScenarioConfigLayersTest(unittest.TestCase):
     def test_scenario_folders_supply_the_live_drill_definitions(self):
         config = VirtraStreamConfig()
         self.assertEqual(set(config.drills), {
-            "pvt", "behavioral_discrimination", "multicolor_gng",
+            "pvt", "behavioral_discrimination", "fitts_gng_clay_colors",
             "basepvt_fitts_gng_clay", "pvt_fitts", "fitts_pvt_clay",
             "snake_drill", "drill_3b", "basepvt_fitts_clay",
         })

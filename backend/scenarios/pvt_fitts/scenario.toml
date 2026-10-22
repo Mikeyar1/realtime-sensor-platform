@@ -10,6 +10,9 @@ canonical_key = "pvt_fitts"
 label = "PVT / Fitts"
 task_type = "PVT_FITTS"
 default_component = "pvt"
+trial_adapter = "native_target_response"
+cognitive_skills = ["vigilance", "sustained_attention", "reaction_latency", "motor_acquisition", "shooting_performance"]
+selected_metric_ids = ["pvt.total_trials", "pvt.rt_median_ms", "pvt.omission_rate_pct", "pvt.response_rate_pct", "pvt.accuracy_pct"]
 
 [drills.pvt_fitts.components.pvt]
 label = "PVT"

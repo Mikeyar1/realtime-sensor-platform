@@ -1,5 +1,5 @@
 """
-cognitive_attributes/discrimination/metrics.py — Two-phase discrimination metrics.
+metrics/discrimination.py — Two-phase discrimination metrics.
 
 Consumes the trial list from DiscriminationTracker and produces the AAR metric
 set for Drill 3A / 3B.
@@ -21,7 +21,7 @@ NO MARKSMANSHIP METRIC HERE
 
 from __future__ import annotations
 import statistics
-from ..pvt.metrics import compute_metrics as _compute_pvt_metrics
+from .pvt import compute_metrics as _compute_pvt_metrics
 
 # Trial result constants (must match tracker.py)
 HIT               = "hit"

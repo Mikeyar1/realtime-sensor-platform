@@ -1,5 +1,5 @@
 """
-cognitive_attributes/pvt/tracker.py — Real-time PVT trial tracker.
+trial_models/native_target_response.py — Real-time PVT trial tracker.
 
 Processes VirTra events into completed PVT trials and broadcasts
 running metrics after each trial.
@@ -35,7 +35,7 @@ TRIAL STATE MACHINE
      a. Shot Hit within window  → close as hit
      b. Window expires          → close as omission
 
-CONFIGURABLE PARAMETERS (drill_registry.toml [cognitive_attributes.pvt.params])
+CONFIGURABLE PARAMETERS (scenarios/<id>/native.toml [drills.<id>.native_params])
   valid_targets   list[str]  Names that count as stimuli (case-insensitive).
                              Empty → accept any target not in ignore_targets.
   ignore_targets  list[str]  Names always skipped (Ivan, fixation…).
@@ -51,7 +51,7 @@ import threading
 from dataclasses import dataclass
 from typing import Optional
 
-from .metrics import compute_metrics
+from metrics.pvt import compute_metrics
 
 
 @dataclass
@@ -158,8 +158,8 @@ class PvtTracker:
         """
         Call at the start of each scenario.
 
-        params  — from [cognitive_attributes.pvt.params] in drill_registry.toml
-        targets — from [cognitive_attributes.pvt.targets] in drill_registry.toml
+        params  — from [drills.<id>.native_params] in native.toml
+        targets — from [drills.<id>.native_targets] in native.toml
                   May contain 'valid_targets' and/or 'ignore_targets' lists.
                   Values in params take precedence over values in targets.
         """

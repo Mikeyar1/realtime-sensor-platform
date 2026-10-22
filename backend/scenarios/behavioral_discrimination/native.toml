@@ -6,3 +6,13 @@ kind = "native"
 [drills.behavioral_discrimination]
 native_metadata_formats = ["pairs_v1"]
 native_scenarios = ["basePVT_GNG_Actor"]
+
+[drills.behavioral_discrimination.native_params]
+grace_window_ms = 200
+lapse_multiplier = 1.5
+threat_suffixes = ["_threat"]
+nonthreat_suffixes = ["_nonthreat"]
+
+[drills.behavioral_discrimination.native_targets]
+pvt_targets = ["neutral"]
+ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)"]

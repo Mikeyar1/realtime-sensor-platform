@@ -8,8 +8,14 @@ native_metadata_formats = ["pairs_v1"]
 native_adapter = "PVT"
 native_result_key = "pvt"
 native_scenarios = ["Fitts-PVT_Clay"]
+native_selected_metric_ids = ["pvt.total_trials", "pvt.rt_median_ms", "pvt.omission_rate_pct", "pvt.response_rate_pct", "pvt.accuracy_pct"]
 
 [drills.fitts_pvt_clay.native_params]
+lapse_multiplier = 1.5
 # Native comparison mode: "neutral" is the fixation target, while the
 # stimulus targets are named "neutral_0", "neutral_1", and so on.
 valid_targets = ["neutral_"]
+
+[drills.fitts_pvt_clay.native_targets]
+valid_targets = ["neutral_"]
+ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)", "end_of_round_target"]

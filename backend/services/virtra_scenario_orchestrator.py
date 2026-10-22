@@ -3,14 +3,13 @@ virtra_scenario_orchestrator.py — Real-time VirTra simulation event processor 
 
 Handles live.activate / live.deactivate, parses incoming VirTra LSL events
 (Scenario Started, Scenario Stopped, Shot, Target Activated, etc.), maintains
-active cognitive attribute context via DrillDefinitionRegistry, delegates trials
-to the appropriate tracker (from cognitive_attributes.ATTRIBUTE_REGISTRY),
+active scenario context via DrillDefinitionRegistry, delegates trials
+to the scenario-selected adapter,
 delegates physiological telemetry to BiosignalRollingMonitor, and triggers
 post-scenario metric computation and session storage workflows.
 
-Adding a new cognitive attribute: create its tracker + metrics in
-cognitive_attributes/<name>/, register in ATTRIBUTE_REGISTRY, add TOML section.
-No changes needed here.
+Scenario configs select trial adapters and metric IDs. Cognitive-skill links
+are interpretation metadata, separate from event handling.
 """
 
 import asyncio
@@ -26,7 +25,7 @@ from pylsl import local_clock
 from .drill_definition_registry import DrillDefinitionRegistry
 from .biosignal_rolling_monitor import BiosignalRollingMonitor
 from .analysis_service_client import AnalysisServiceClient
-from cognitive_attributes import ATTRIBUTE_REGISTRY
+from trial_models.registry import tracker_for
 from event_decoders.custom_lsl import CustomLslEvent, decode_custom_lsl_sample
 from event_decoders.native_virtra import decode_native_lsl_sample, parse_native_metadata
 from virtra_custom_lsl.session import CustomLslSessionBase
@@ -166,8 +165,11 @@ class VirTraScenarioOrchestrator:
 
     # ── Sample routing ────────────────────────────────────────────────────────
 
-    def on_sample(self, stream_name: str, stream_type: str, timestamp: float, data: list):
+    def on_sample(self, stream_name: str, stream_type: str, timestamp: float, data: list,
+                  *, source_event=None):
         """Called for every LSL sample from any stream."""
+        if source_event is not None and source_event.status != "decoded":
+            return source_event.status
         # LSL producers are not consistent about type casing or separators.
         # Normalize here so "HR", "hr", "Heart Rate", and similar variants
         # reach the same session accumulator.
@@ -201,7 +203,7 @@ class VirTraScenarioOrchestrator:
         # Classify format first. The drill's metrics_source decides scoring.
         source = self._stream_config.stream_source(stream_name, stream_type)
         if source == "custom":
-            return self._on_custom_lsl_sample(timestamp, data)
+            return self._on_custom_lsl_sample(timestamp, data, source_event=source_event)
 
         # 3. VirTra stream check
         if source != "native":
@@ -209,7 +211,7 @@ class VirTraScenarioOrchestrator:
         if len(data) < 1:
             return "malformed"
 
-        decoded = decode_native_lsl_sample(data)
+        decoded = source_event.decoded if source_event is not None else decode_native_lsl_sample(data)
         if decoded is None:
             return "malformed"
         event_type = decoded.event_name
@@ -351,11 +353,11 @@ class VirTraScenarioOrchestrator:
             "type": "session.weapon_info", "weapon_type": weapon_type,
         }), self._loop)
 
-    def _on_custom_lsl_sample(self, timestamp: float, data: list):
+    def _on_custom_lsl_sample(self, timestamp: float, data: list, *, source_event=None):
         with self._event_lock:
-            return self._process_custom_lsl_sample(timestamp, data)
+            return self._process_custom_lsl_sample(timestamp, data, source_event=source_event)
 
-    def _process_custom_lsl_sample(self, timestamp: float, data: list):
+    def _process_custom_lsl_sample(self, timestamp: float, data: list, *, source_event=None):
         """
         Route one sample from the custom, script-driven VirTra LSL stream.
 
@@ -363,7 +365,7 @@ class VirTraScenarioOrchestrator:
         stream emits its own "Scenario Started"/"Scenario Stopped" and resolves
         trackers by payload drill_type via [custom_lsl_drills] in the registry.
         """
-        event = decode_custom_lsl_sample(data)
+        event = source_event.decoded if source_event is not None else decode_custom_lsl_sample(data)
         if event is None:
             return "malformed"
         normalized = normalize_custom_event(event, timestamp, self._stream_config)
@@ -486,7 +488,7 @@ class VirTraScenarioOrchestrator:
             return
 
         task_type = drill_info.get("task_type", "")
-        TrackerClass, _ = ATTRIBUTE_REGISTRY.get(task_type, (None, None))
+        TrackerClass = tracker_for(drill_info)
         if TrackerClass is None or not issubclass(TrackerClass, CustomLslSessionBase):
             print(f"[VirTraScenarioOrchestrator] No custom LSL tracker for task_type={task_type!r}")
             return
@@ -520,7 +522,10 @@ class VirTraScenarioOrchestrator:
             })
         self._round_assessments.begin(
             self._custom_session_id, drill_info["drill_key"], event.scenario_name,
-            event.scenario_id, timestamp)
+            event.scenario_id, timestamp, {
+                key: drill_info.get(key) for key in
+                ("scenario_id", "scenario_revision", "selected_metric_ids", "cognitive_skills")
+            })
         self._biosignals.reset(record_session=drill_info["drill_key"] not in DRILLS)
         if self._native_context:
             self._match_native_context(timestamp)
@@ -601,6 +606,10 @@ class VirTraScenarioOrchestrator:
         session_record["capture_status"] = (
             "partial" if self._custom_partial_start else "complete")
         session_record["task_type"] = drill_info["task_type"]
+        session_record["assessment_selection"] = {
+            key: drill_info.get(key) for key in
+            ("scenario_id", "scenario_revision", "selected_metric_ids", "cognitive_skills")
+        }
         session_record["external_scenario_id"] = (
             event.scenario_id or self._active_custom_session.scenario_id)
 
@@ -717,8 +726,8 @@ class VirTraScenarioOrchestrator:
         if drill_info is None:
             return
 
-        if drill_info["task_type"] not in ATTRIBUTE_REGISTRY:
-            print(f"[VirTraScenarioOrchestrator] Unsupported task type: {drill_info['task_type']!r}")
+        if tracker_for(drill_info) is None:
+            print(f"[VirTraScenarioOrchestrator] Unsupported trial adapter: {drill_info.get('trial_adapter')!r}")
             return
         self._run_source = "native"
 
@@ -733,7 +742,7 @@ class VirTraScenarioOrchestrator:
         if not already_active:
             # Instantiate the tracker for this cognitive attribute from the registry
             task_type = drill_info.get("task_type", "")
-            TrackerClass, _ = ATTRIBUTE_REGISTRY.get(task_type, (None, None))
+            TrackerClass = tracker_for(drill_info)
             if TrackerClass is not None:
                 self._active_tracker = TrackerClass(
                     broadcast_fn=self._broadcast, loop=self._loop
@@ -830,6 +839,10 @@ class VirTraScenarioOrchestrator:
 
         drill_key_for_analysis = self._active_drill["drill_key"]
         task_type_for_analysis = self._active_drill["task_type"]
+        assessment_selection = {
+            key: self._active_drill.get(key) for key in
+            ("scenario_id", "scenario_revision", "selected_metric_ids", "cognitive_skills")
+        }
 
         msg = {
             "type":          "session.scenario_stopped",
@@ -891,6 +904,7 @@ class VirTraScenarioOrchestrator:
             )
             session_record["source"] = "native"
             session_record["metrics_source"] = "native"
+            session_record["assessment_selection"] = assessment_selection
             session_record["native_context"] = {
                 **self._native_context, "weapon_type": self._weapon_type,
             }

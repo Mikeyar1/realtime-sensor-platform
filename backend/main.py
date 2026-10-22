@@ -28,6 +28,7 @@ if HERE not in sys.path:
 
 from config import HOST, PORT, LSL_DISCOVERY_INTERVAL, LSL_PULL_TIMEOUT, DATABASE_PATH, FRONTEND_PORT, OPEN_BROWSER
 from lsl.lsl_stream_inlet_manager import LslStreamInletManager
+from audit.event_store import EventStore
 from transport.websocket_server_transport import WebSocketServerTransport
 from services.session_lifecycle_coordinator import SessionLifecycleCoordinator
 from services.database import init_db
@@ -96,6 +97,9 @@ class LabReviewBackendServer:
 
         # 0. Initialize SQLite database (idempotent — creates tables if needed)
         init_db(DATABASE_PATH)
+        self.event_store = EventStore(
+            DATABASE_PATH,
+            provenance=os.environ.get("LABREVIEW_CAPTURE_PROVENANCE", "lsl_ingest"))
 
         # 1. Initialize WebSocket transport
         self.transport = WebSocketServerTransport(host=self.host, port=self.port)
@@ -128,6 +132,7 @@ class LabReviewBackendServer:
             broadcast_fn=self.transport.broadcast,
             send_fn=self.transport.send,
             loop=self._loop,
+            event_store=self.event_store,
         )
         self.transport.set_coordinator(self.coordinator)
 
@@ -167,8 +172,11 @@ class LabReviewBackendServer:
     async def stop(self):
         """Clean shutdown of all components."""
         print("[LabReviewBackendServer] Stopping services...")
-        self.inlet_manager.stop()
-        await self.transport.stop()
+        try:
+            self.inlet_manager.stop()
+            await self.transport.stop()
+        finally:
+            self.event_store.close()
         print("[LabReviewBackendServer] Shutdown complete.")
 
     def run(self):

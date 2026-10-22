@@ -8,3 +8,10 @@ native_metadata_formats = ["pairs_v1"]
 native_adapter = "PVT"
 native_result_key = "pvt"
 native_scenarios = ["LVL1_PVT_FITTS_ASSESSMENT"]
+
+[drills.pvt_fitts.native_params]
+lapse_multiplier = 1.5
+
+[drills.pvt_fitts.native_targets]
+valid_targets = ["neutral"]
+ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)", "end_of_round_target"]

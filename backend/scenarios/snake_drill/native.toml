@@ -6,3 +6,10 @@ kind = "native"
 [drills.snake_drill]
 native_metadata_formats = ["pairs_v1"]
 native_scenarios = ["Snake Drill"]
+
+[drills.snake_drill.native_params]
+lapse_multiplier = 1.5
+
+[drills.snake_drill.native_targets]
+valid_targets = ["neutral"]
+ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)", "end_of_round_target"]

@@ -1,5 +1,5 @@
 """
-cognitive_attributes/multicolor_gng/metrics.py — Go/No-Go summary metric computation.
+metrics/go_no_go.py — Go/No-Go summary metric computation.
 
 Consumes the trial list from MulticolorGngTracker.get_session_record() and
 produces the AAR metric set for the Frontend. Live and final metrics use the

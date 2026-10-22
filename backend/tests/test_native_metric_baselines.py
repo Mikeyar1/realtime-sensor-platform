@@ -7,9 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cognitive_attributes.pvt.metrics import compute_metrics as score_pvt
-from cognitive_attributes.multicolor_gng.metrics import compute_metrics as score_gng
-from cognitive_attributes.discrimination.metrics import compute_metrics as score_disc
+from metrics.pvt import compute_metrics as score_pvt
+from metrics.go_no_go import compute_metrics as score_gng
+from metrics.discrimination import compute_metrics as score_disc
 
 
 class NativeMetricBaselineTests(unittest.TestCase):

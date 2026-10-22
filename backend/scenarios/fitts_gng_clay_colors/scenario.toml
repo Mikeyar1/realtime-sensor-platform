@@ -1,0 +1,21 @@
+schema_version = 1
+
+[scenario]
+id = "fitts_gng_clay_colors"
+revision = 1
+
+[drills.fitts_gng_clay_colors]
+metrics_source = "custom"
+canonical_key = "gng"
+label = "Fitts-GNG_ClayColors"
+task_type = "GNG"
+default_component = "gng"
+trial_adapter = "custom_go_no_go"
+cognitive_skills = ["response_inhibition", "reaction_latency", "shooting_performance"]
+selected_metric_ids = ["gng.total_trials", "gng.hit_rate_pct", "gng.false_alarm_rate", "gng.correct_rejection_rate_pct", "gng.overall_accuracy_pct", "gng.rt_median_ms"]
+
+[drills.fitts_gng_clay_colors.components.gng]
+label = "Go/No-Go"
+phase_values = []                 # this single-component stream has no phase field
+metric_set = "GNG"
+scoring_status = "implemented"

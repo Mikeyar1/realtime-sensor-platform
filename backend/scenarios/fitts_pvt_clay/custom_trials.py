@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from math import isfinite
-from assessments.pvt_fitts import score as score_pvt_fitts, score_live, score_completed_run
-from cognitive_attributes.pvt.metrics import compute_metrics as compute_pvt_metrics
 
 from virtra_custom_lsl.session import CustomLslSessionBase
+
+
+from metrics.fitts_pvt import compute_metrics
+from assessments.pvt_fitts import score as score_pvt_fitts, score_live
 
 
 def _number(value):
@@ -20,43 +22,6 @@ def _number(value):
         return result if isfinite(result) and result >= 0 else None
     except (TypeError, ValueError):
         return None
-
-
-def compute_metrics(trials: list[dict], record: dict | None = None) -> dict:
-    """Score the versioned PVT/Fitts contract, retaining old display-only extras."""
-    resolved = [trial for trial in trials if trial.get("result") in {"hit", "miss", "omission"}]
-    metric_trials = ([{**trial, "trial_number": index}
-                      for index, trial in enumerate(sorted(
-                          resolved, key=lambda item: item.get("activated_at") or 0), 1)]
-                     if record is not None else resolved)
-    extras = compute_pvt_metrics(metric_trials)
-    if record is not None:
-        rounds = record.get("rounds", [])
-        if all("round_number" in row for row in rounds):
-            completed_shots_known = all(
-                row.get("quality", {}).get("shot_identity_complete", True)
-                for row in rounds if row.get("ended_reason") == "completed")
-            metrics = score_completed_run(rounds, trials, record.get("shots")
-                                          if completed_shots_known else None)
-            metrics["duration_basis"] = "sum_completed_round_boundaries"
-        else:
-            # Older saved records have no round boundaries. Keep their duration
-            # explicitly marked as a legacy estimate, never a new v1 result.
-            metrics = score_pvt_fitts(trials, record.get("shots"),
-                            completed_rounds=sum(r.get("ended_reason") == "completed" for r in rounds))
-            durations = [r.get("metrics", {}).get("duration_s") for r in rounds
-                         if r.get("ended_reason") == "completed"]
-            if durations and all(isinstance(value, (int, float)) for value in durations):
-                metrics["duration_s"] = sum(durations)
-            metrics["duration_basis"] = "legacy_trial_windows"
-            metrics["excluded_rounds"] = len(rounds) - metrics["completed_rounds"]
-    else:
-        metrics = score_pvt_fitts(trials)
-        metrics["duration_s"] = extras.get("duration_s")
-        metrics["duration_basis"] = "provisional_trial_span"
-    for key, value in extras.items():
-        metrics.setdefault(key, value)
-    return metrics
 
 
 class FittsPvtClayTracker(CustomLslSessionBase):
@@ -128,7 +93,8 @@ class FittsPvtClayTracker(CustomLslSessionBase):
             self._upsert_shot(shot, event, "hit")
             if isinstance(shot, dict) and shot.get("counted_as_first_target_hit") is True:
                 self._close_target(shot.get("target"), "hit", event,
-                                   _number(shot.get("reaction_time_seconds")))
+                                   _number(self.field_value(event, "reaction_time_seconds", (
+                                       "data.shot.reaction_time_seconds",))))
         elif self.event_matches("trial_timeout", name, "Target Timed Out") and isinstance(target, dict):
             self._close_target(target, "timeout", event, None)
         elif self.event_matches("shot_miss", name, "Shot Missed"):
@@ -182,7 +148,8 @@ class FittsPvtClayTracker(CustomLslSessionBase):
     def _upsert_shot(self, shot, event, result="unknown"):
         if not isinstance(shot, dict) or self._round_open is None:
             return
-        shot_id = str(shot.get("shot_id") or "").strip()
+        shot_id = str(self.field_value(event, "shot_id", (
+            "data.shot.shot_id", "data.shot_id")) or shot.get("shot_id") or "").strip()
         if not shot_id:
             self._shot_identity_incomplete.add((self._round_open.round_number,
                                                 self._round_open.attempt))
@@ -213,8 +180,12 @@ class FittsPvtClayTracker(CustomLslSessionBase):
                 else self._round_shots(round_number, attempt))
 
     def _open_trial(self, target, event):
-        target_id = str(target.get("target_id") or "")
-        index = target.get("presentation_index")
+        target_id = str(self.field_value(event, "target_id", (
+            "data.target_id", "data.target.target_id")) or target.get("target_id") or "")
+        index = self.field_value(event, "trial_index", (
+            "data.presentation_index", "data.target.presentation_index"))
+        if index is None:
+            index = target.get("presentation_index")
         if not target_id or index is None:
             return
         if any(t["target_id"] == target_id and t["presentation_index"] == index
@@ -246,8 +217,12 @@ class FittsPvtClayTracker(CustomLslSessionBase):
     def _close_target(self, target, result, event, rt_s):
         if not isinstance(target, dict):
             return
-        target_id = str(target.get("target_id") or "")
-        index = target.get("presentation_index")
+        target_id = str(self.field_value(event, "target_id", (
+            "data.target.target_id", "data.shot.target.target_id")) or target.get("target_id") or "")
+        index = self.field_value(event, "trial_index", (
+            "data.target.presentation_index", "data.shot.target.presentation_index"))
+        if index is None:
+            index = target.get("presentation_index")
         candidates = [trial for trial in self._open if trial["target_id"] == target_id]
         spawn = _number(target.get("spawn_timestamp_seconds"))
         if spawn is not None and any(trial.get("spawn_timestamp_seconds") is not None
@@ -292,7 +267,8 @@ class FittsPvtClayTracker(CustomLslSessionBase):
     def _record_shot(self, shot, event):
         if not isinstance(shot, dict):
             return
-        shot_id = str(shot.get("shot_id") or "")
+        shot_id = str(self.field_value(event, "shot_id", (
+            "data.shot.shot_id", "data.shot_id")) or shot.get("shot_id") or "")
         if shot_id and shot_id in self._seen_shot_ids:
             return
         if shot_id:

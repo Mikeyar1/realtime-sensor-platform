@@ -17,6 +17,8 @@ run.save_remaining, with an end-of-run compatibility bridge):
 """
 
 import asyncio
+import sqlite3
+import threading
 import time
 import uuid
 from typing import Callable, Optional
@@ -35,6 +37,9 @@ from api.message_types import (
 )
 from .virtra_scenario_orchestrator import VirTraScenarioOrchestrator
 from . import round_repository
+from audit.attribution import EventAttributor, _custom_round
+from event_decoders.source_event import decode_source_event
+from scenarios.registry import ScenarioRegistry
 
 
 def _db_get_participants() -> list[str]:
@@ -134,11 +139,14 @@ class SessionLifecycleCoordinator:
         broadcast_fn:  Callable,
         send_fn:       Callable,
         loop:          asyncio.AbstractEventLoop,
+        event_store = None,
     ):
         self._inlets    = inlet_manager
         self._broadcast = broadcast_fn
         self._send      = send_fn
         self._loop      = loop
+        self._event_store = event_store
+        self._ingest_lock = threading.RLock()
 
         # Live session state
         self._state:           str   = STATE_IDLE
@@ -154,6 +162,9 @@ class SessionLifecycleCoordinator:
             on_live_deactivate_fn = self._on_live_deactivate,
             loop                  = loop,
         )
+        self._event_attributor = (EventAttributor(
+            event_store, ScenarioRegistry(self._orchestrator._stream_config))
+            if event_store is not None else None)
 
         print("[SessionLifecycleCoordinator] Initialized — live streaming session mode")
 
@@ -187,6 +198,30 @@ class SessionLifecycleCoordinator:
 
         elif msg_type == "streams.get_catalog":
             await self._send(websocket, self._catalog_payload())
+
+        elif msg_type in {"audit.capture.get", "audit.capture.runs", "audit.run.get"}:
+            if self._event_store is None:
+                await self._send(websocket, self._error("audit_unavailable", "Audit store is unavailable"))
+            else:
+                try:
+                    limit = max(1, min(int(msg.get("limit", 100)), 1000))
+                    if msg_type == "audit.capture.get":
+                        capture_id = str(msg.get("capture_id") or self._event_store.capture_id)
+                        rows = await self._loop.run_in_executor(
+                            None, lambda: self._event_store.get_capture_events(
+                                capture_id, limit=limit,
+                                after_sequence=int(msg.get("after_sequence", 0))))
+                    elif msg_type == "audit.capture.runs":
+                        capture_id = str(msg.get("capture_id") or self._event_store.capture_id)
+                        rows = await self._loop.run_in_executor(
+                            None, lambda: self._event_store.get_capture_runs(capture_id))
+                    else:
+                        rows = await self._loop.run_in_executor(
+                            None, lambda: self._event_store.get_run_events(
+                                str(msg.get("run_id") or ""), limit=limit))
+                    await self._send(websocket, {"type": "audit.events", "events": rows})
+                except (ValueError, TypeError, sqlite3.Error) as exc:
+                    await self._send(websocket, self._error("audit_query_invalid", str(exc)))
 
         elif msg_type == "system.get_state":
             await self._send(websocket, self._state_payload())
@@ -466,8 +501,53 @@ class SessionLifecycleCoordinator:
 
     # ── Ingestion callbacks ───────────────────────────────────────────────────
 
-    def on_sample(self, stream_name: str, stream_type: str, timestamp: float, data: list):
-        return self._orchestrator.on_sample(stream_name, stream_type, timestamp, data)
+    def on_sample(self, stream_name: str, stream_type: str, timestamp: float, data: list,
+                  *, outlet_uid: str = "", source_id: str = ""):
+        source = self._orchestrator._stream_config.stream_source(stream_name, stream_type)
+        if source not in {"custom", "native"} or self._event_store is None:
+            return self._orchestrator.on_sample(stream_name, stream_type, timestamp, data)
+        # Sequence assignment, lifecycle routing, and link attribution must
+        # share one order across native and custom worker threads for replay.
+        with self._ingest_lock:
+            return self._audit_and_route(stream_name, stream_type, timestamp, data,
+                                         source, outlet_uid, source_id)
+
+    def _audit_and_route(self, stream_name, stream_type, timestamp, data,
+                         source, outlet_uid, source_id):
+        event = decode_source_event(source, data)
+        event_id = self._event_store.append(
+            outlet_uid=outlet_uid, stream_name=stream_name, stream_type=stream_type,
+            source_id=source_id, lsl_timestamp=timestamp, channels=data,
+            source_event=event)
+        if event_id is None:
+            return "dropped"  # never score an event without an audit identity
+        if event.status != "decoded":
+            return event.status
+        router = self._orchestrator
+        before_custom_run = router._custom_session_id
+        before_custom_scenario_id = (router._active_custom_drill or {}).get(
+            "stream_policy", {}).get("scenario_id", "")
+        before_native_active = router._active_drill is not None
+        before_native_scenario = router._active_scenario or ""
+        before_context_matched = router._custom_context.get("context_match_status") in {
+            "matched_name", "matched_alias"}
+        before_round_id = (_custom_round(router, event, timestamp)
+                           if source == "custom" else None)
+        try:
+            outcome = router.on_sample(stream_name, stream_type, timestamp, data,
+                                       source_event=event)
+            self._event_attributor.route(
+                event_id, event, outcome, router, timestamp,
+                before_custom_run=before_custom_run,
+                before_custom_scenario_id=before_custom_scenario_id,
+                before_native_active=before_native_active,
+                before_native_scenario=before_native_scenario,
+                before_context_matched=before_context_matched,
+                before_round_id=before_round_id)
+        except Exception as exc:
+            self._event_store.mark_processing_error(exc)
+            raise
+        return outcome
 
     def on_catalog_changed(self, catalog: list):
         self._orchestrator.on_catalog_changed(catalog)
@@ -500,6 +580,7 @@ class SessionLifecycleCoordinator:
             "mode":             MODE_LIVE,
             "state":            self._state,
             "elapsed_seconds":  elapsed,
+            "audit": self._event_store.health() if self._event_store else None,
         }
 
     def _catalog_payload(self, catalog: list = None) -> dict:

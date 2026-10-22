@@ -9,11 +9,24 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import sys
 import tomllib
 from pathlib import Path
 from typing import Any
 from assessments.catalog import CATEGORIES, DRILLS
+from cognitive_skills.catalog import SKILLS
+from metrics.catalog import METRICS
+from trial_models.registry import TRIAL_ADAPTERS
+
+
+_TRIAL_MODELS = {
+    "PVT": "target_response", "PVT_FITTS": "target_response",
+    "GNG": "go_no_go", "DISCRIMINATION": "discrimination",
+    "COMPOSITE": "composite",
+}
+_IMPLEMENTED_METRIC_SETS = {"PVT", "GNG", "DISCRIMINATION", "PVT_FITTS"}
+_FIELD_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
 
 def default_config_path() -> Path:
@@ -113,6 +126,7 @@ def _load_scenario_drills(root: Path) -> dict:
             definition = _merge_tables(definition, source_config["drills"][name])
         definition.setdefault("native_scenarios", [])
         definition.setdefault("custom_drill_types", [])
+        definition.setdefault("trial_model", _TRIAL_MODELS.get(definition.get("task_type")))
         definitions[name] = {**definition, "scenario_id": name,
                              "scenario_revision": revision}
     if not definitions:
@@ -190,6 +204,16 @@ def _validate(data: dict) -> None:
         _strings(stream.get("types"), f"streams.{source}.types")
         if stream.get("match") not in {"name", "type", "any", "all"}:
             raise ValueError(f"streams.{source}.match must be name, type, any, or all")
+        for key in ("names", "types"):
+            values = [item.casefold().strip() for item in stream[key]]
+            if any(not item for item in values) or len(values) != len(set(values)):
+                raise ValueError(f"streams.{source}.{key} contains an empty or duplicate alias")
+    native, custom = streams["native"], streams["custom"]
+    for key, matching_modes in (("names", {"name", "any", "all"}),
+                                ("types", {"type", "any", "all"})):
+        if native["match"] in matching_modes and custom["match"] in matching_modes:
+            if {item.casefold() for item in native[key]} & {item.casefold() for item in custom[key]}:
+                raise ValueError(f"native and custom stream {key} overlap")
 
     lifecycle_policy = data.get("custom_lifecycle")
     if not isinstance(lifecycle_policy, dict) or not isinstance(
@@ -217,6 +241,8 @@ def _validate(data: dict) -> None:
         raise ValueError("[fields] is required")
     for name, paths in fields.items():
         _strings(paths, f"fields.{name}")
+        if any(not _FIELD_PATH.fullmatch(path) for path in paths):
+            raise ValueError(f"fields.{name} contains an invalid dotted path")
 
     drills = data.get("drills")
     if not isinstance(drills, dict):
@@ -229,6 +255,9 @@ def _validate(data: dict) -> None:
         _required_text(drill.get("canonical_key"), f"drills.{name}.canonical_key")
         _required_text(drill.get("label"), f"drills.{name}.label")
         _required_text(drill.get("task_type"), f"drills.{name}.task_type")
+        expected_model = _TRIAL_MODELS.get(drill["task_type"])
+        if expected_model is None or drill.get("trial_model", expected_model) != expected_model:
+            raise ValueError(f"drills.{name}.trial_model is incompatible with task_type")
         binding = DRILLS.get(drill.get("canonical_key"))
         if binding is not None:
             category_id = _required_text(drill.get("category_id"), f"drills.{name}.category_id")
@@ -238,9 +267,44 @@ def _validate(data: dict) -> None:
             profile = CATEGORIES[category_id].profile
             if profile_id != profile.id:
                 raise ValueError(f"drills.{name} has an invalid assessment profile binding")
+            selected_metrics = _strings(
+                drill.get("metric_ids", [metric.id for metric in profile.metrics]),
+                f"drills.{name}.metric_ids")
+            known_metrics = {metric.id for metric in profile.metrics}
+            if (not selected_metrics or len(selected_metrics) != len(set(selected_metrics)) or
+                    not set(selected_metrics) <= known_metrics):
+                raise ValueError(f"drills.{name}.metric_ids contains an unknown or duplicate metric")
+        elif "metric_ids" in drill:
+            raise ValueError(f"drills.{name}.metric_ids requires a catalog profile")
         source = drill.get("metrics_source")
         if source not in {"native", "custom", "disabled"}:
             raise ValueError(f"drills.{name}.metrics_source must be native, custom, or disabled")
+        adapter = drill.get("trial_adapter")
+        if source != "disabled" and adapter not in TRIAL_ADAPTERS:
+            raise ValueError(f"drills.{name}.trial_adapter is not implemented")
+        if source == "native" and adapter and not adapter.startswith("native_") and drill.get("native_adapter") != "PVT":
+            raise ValueError(f"drills.{name}.trial_adapter is incompatible with source")
+        skills = _strings(drill.get("cognitive_skills", []), f"drills.{name}.cognitive_skills")
+        if len(skills) != len(set(skills)) or not set(skills) <= SKILLS.keys():
+            raise ValueError(f"drills.{name}.cognitive_skills has an unknown or duplicate skill")
+        selected = _strings(drill.get(
+            "native_selected_metric_ids", drill.get("selected_metric_ids", []))
+            if source == "native" else drill.get("selected_metric_ids", []),
+            f"drills.{name}.selected_metric_ids")
+        if len(selected) != len(set(selected)) or not set(selected) <= METRICS.keys():
+            raise ValueError(f"drills.{name}.selected_metric_ids has an unknown or duplicate metric")
+        effective_adapter = ("native_target_response" if source == "native" and
+                             adapter == "custom_fitts_pvt" else adapter)
+        prefixes = {
+            "native_target_response": ("pvt.",),
+            "native_threat_discrimination": ("pvt.", "discrimination."),
+            "custom_go_no_go": ("gng.",),
+            "custom_fitts_pvt": ("pvt_fitts.",),
+        }.get(effective_adapter, ())
+        if source != "disabled" and any(not metric.startswith(prefixes) for metric in selected):
+            raise ValueError(f"drills.{name}.selected_metric_ids is incompatible with trial adapter")
+        if source != "disabled" and (not skills or not selected):
+            raise ValueError(f"drills.{name} needs cognitive_skills and selected_metric_ids")
         native_scenarios = _strings(drill.get("native_scenarios"),
                                     f"drills.{name}.native_scenarios")
         for alias in native_scenarios:
@@ -251,6 +315,15 @@ def _validate(data: dict) -> None:
         aliases = _strings(drill.get("custom_drill_types"), f"drills.{name}.custom_drill_types")
         if not isinstance(drill.get("native_params", {}), dict):
             raise ValueError(f"drills.{name}.native_params must be a table")
+        if not isinstance(drill.get("native_targets", {}), dict):
+            raise ValueError(f"drills.{name}.native_targets must be a table")
+        for key, values in drill.get("native_targets", {}).items():
+            _strings(values, f"drills.{name}.native_targets.{key}")
+        for key in ("go_actions", "no_go_actions"):
+            if key in drill:
+                _strings(drill[key], f"drills.{name}.{key}")
+        if set(drill.get("go_actions", [])) & set(drill.get("no_go_actions", [])):
+            raise ValueError(f"drills.{name} has overlapping go/no-go actions")
         formats = _strings(drill.get("native_metadata_formats", []),
                            f"drills.{name}.native_metadata_formats")
         if not set(formats) <= {"pairs_v1", "object_v1", "empty"}:
@@ -263,6 +336,8 @@ def _validate(data: dict) -> None:
                 component.get("scoring_status") != "implemented"
                 for component in drill.get("components", {}).values()):
             raise ValueError(f"drills.{name} cannot select custom metrics before its components are implemented")
+        if source == "custom" and adapter and not adapter.startswith("custom_"):
+            raise ValueError(f"drills.{name}.trial_adapter is incompatible with source")
         for alias in aliases:
             key = alias.casefold().strip()
             if not key or key in custom_aliases:
@@ -280,6 +355,10 @@ def _validate(data: dict) -> None:
                 raise ValueError(f"drills.{name}.components.{component_name} must be a table")
             _required_text(component.get("label"),
                            f"drills.{name}.components.{component_name}.label")
+            metric_set = _required_text(component.get("metric_set"),
+                                        f"drills.{name}.components.{component_name}.metric_set")
+            if component.get("scoring_status") == "implemented" and metric_set not in _IMPLEMENTED_METRIC_SETS:
+                raise ValueError(f"drills.{name}.components.{component_name} has no implemented metric set")
             values = _strings(component.get("phase_values"),
                               f"drills.{name}.components.{component_name}.phase_values")
             for value in values:
@@ -294,12 +373,16 @@ def _validate(data: dict) -> None:
                 for local_key, local_values in local.items():
                     _strings(local_values,
                              f"drills.{name}.components.{component_name}.{section}.{local_key}")
+                    if section == "fields" and any(not _FIELD_PATH.fullmatch(path) for path in local_values):
+                        raise ValueError(f"drills.{name}.components.{component_name}.fields.{local_key} has an invalid path")
         for section in ("events", "fields"):
             local = drill.get(section, {})
             if not isinstance(local, dict):
                 raise ValueError(f"drills.{name}.{section} must be a table")
             for key, value in local.items():
                 _strings(value, f"drills.{name}.{section}.{key}")
+                if section == "fields" and any(not _FIELD_PATH.fullmatch(path) for path in value):
+                    raise ValueError(f"drills.{name}.fields.{key} has an invalid path")
 
 
 class VirtraStreamConfig:
@@ -311,6 +394,7 @@ class VirtraStreamConfig:
         self.scenarios_path = (Path(scenarios_path) if scenarios_path is not None
                                else default_scenarios_path())
         self._data: dict = {}
+        self.generation = 0
         self.reload()
 
     def reload(self) -> None:
@@ -325,6 +409,7 @@ class VirtraStreamConfig:
             _load_scenario_drills(self.scenarios_path), candidate.get("drills", {}))
         _validate(candidate)
         self._data = candidate
+        self.generation += 1
 
     @property
     def custom_lifecycle(self) -> dict:

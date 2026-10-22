@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import deque
 
 from assessments.catalog import CATEGORIES, DRILLS
+from metrics.catalog import assessment_snapshot
 from . import round_repository
 
 
@@ -19,6 +20,7 @@ class RoundAssessmentService:
         self._recent_set: set[tuple] = set()
         self._recent_raw_times: dict[tuple[str, ...], float] = {}
         self._last_terminal_id: str | None = None
+        self._selection_by_run: dict[str, dict] = {}
 
     def accepts(self, timestamp: float, raw: list, *, scenario_id: str,
                 is_explicit_start: bool, drill_key: str = "") -> bool:
@@ -47,10 +49,13 @@ class RoundAssessmentService:
         return True
 
     def begin(self, run_id: str, drill_key: str, scenario_name: str,
-              external_scenario_id: str, timestamp: float) -> None:
+              external_scenario_id: str, timestamp: float,
+              assessment_selection: dict | None = None) -> None:
         binding = DRILLS.get(drill_key)
         if binding is None or not round_repository.available():
             return
+        if assessment_selection:
+            self._selection_by_run[run_id] = dict(assessment_selection)
         profile = CATEGORIES[binding.category_id].profile
         round_repository.capture_run(
             run_id, drill_key=binding.id, category_id=binding.category_id,
@@ -65,6 +70,10 @@ class RoundAssessmentService:
         shots = tracker.get_shots()
         results = []
         for row in tracker.rounds_snapshot():
+            selection = self._selection_by_run.get(run_id)
+            if selection and selection.get("selected_metric_ids"):
+                row["metrics"] = dict(row.get("metrics") or {})
+                row["metrics"]["_assessment"] = assessment_snapshot(row["metrics"], selection)
             key = (row["round_number"], row.get("attempt", 1))
             selected_trials = [trial for trial in trials if
                                (trial.get("round_number"), trial.get("round_attempt", 1)) == key]
@@ -80,6 +89,7 @@ class RoundAssessmentService:
         results = self.checkpoint(run_id, drill_key, tracker)
         if drill_key in DRILLS and round_repository.available():
             round_repository.close_run(run_id, timestamp, reason, source)
+        self._selection_by_run.pop(run_id, None)
         self._last_terminal_id = external_scenario_id
         return results
 

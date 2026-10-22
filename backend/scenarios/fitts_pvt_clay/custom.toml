@@ -24,6 +24,7 @@ script_metrics = ["Metrics Updated"]
 
 [drills.fitts_pvt_clay.fields]
 target_id = ["data.target.target_id", "data.shot.target.target_id", "data.target_id"]
+shot_id = ["data.shot.shot_id", "data.shot_id"]
 trial_index = ["data.target.presentation_index", "data.shot.target.presentation_index"]
 reaction_time_seconds = ["data.shot.reaction_time_seconds", "data.reaction_time_seconds"]
 script_metrics = ["data.metrics"]

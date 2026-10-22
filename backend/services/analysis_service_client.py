@@ -2,7 +2,7 @@
 analysis_service_client.py — Post-scenario metric computation and session record management.
 
 Replaces the former Analysis HTTP microservice with direct calls to the
-cognitive_attributes metric functions. No external process needed.
+metrics registry functions. No external process needed.
 
 Responsibilities:
   1. Compute summary metrics from the trial list via the attribute's metrics function.
@@ -15,7 +15,8 @@ import asyncio
 import traceback
 from typing import Callable, Optional
 
-from cognitive_attributes import ATTRIBUTE_REGISTRY
+from metrics.registry import score_session
+from metrics.catalog import assessment_snapshot
 from assessments.catalog import DRILLS
 
 
@@ -26,20 +27,8 @@ def _compute_metrics_for_session(session_record: dict) -> Optional[dict]:
     Uses the metrics function registered in ATTRIBUTE_REGISTRY for this task_type.
     Returns None if the task_type has no registered metrics function.
     """
-    task_type = (session_record.get("task_type") or "").upper()
-    drill_key = session_record.get("drill_key", "")
-
-    # Look up by task_type first; fall back to drill_key (uppercase)
-    entry = ATTRIBUTE_REGISTRY.get(task_type) or ATTRIBUTE_REGISTRY.get(drill_key.upper())
-    if entry is None:
-        print(f"[AnalysisServiceClient] No metrics function for task_type={task_type!r} — skipping")
-        return None
-
-    _, metrics_fn = entry
     try:
-        trials  = session_record.get("trials", [])
-        metrics = metrics_fn(trials, session_record)
-        return metrics
+        return score_session(session_record)
     except Exception as e:
         print(f"[AnalysisServiceClient] ✗ Metrics computation error: {e}")
         traceback.print_exc()
@@ -141,6 +130,10 @@ class AnalysisServiceClient:
                 "error":     "metrics_unavailable",
             })
             return
+
+        selection = session_record.get("assessment_selection") or {}
+        if selection.get("selected_metric_ids"):
+            metrics["_assessment"] = assessment_snapshot(metrics, selection)
 
         # PVT/Fitts rounds are checkpointed at their own boundaries. A legacy
         # session insert here would create a second, conflicting result owner.

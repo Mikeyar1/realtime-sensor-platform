@@ -1,5 +1,5 @@
 """
-cognitive_attributes/discrimination/tracker.py — Two-phase discrimination tracker.
+scenarios/behavioral_discrimination/native_trials.py — Two-phase discrimination tracker.
 
 Handles Drill 3A (Single-Target Discrimination) and Drill 3B (dual-lane).
 Both drills run a PVT phase first, then a threat/non-threat discrimination phase.
@@ -36,7 +36,7 @@ TRIAL OUTCOMES
     nonthreat engaged  → false_alarm         (shot a civilian — critical error)
     nonthreat withheld → correct_rejection   (correct restraint)
 
-CONFIGURABLE PARAMETERS ([cognitive_attributes.discrimination.params])
+CONFIGURABLE PARAMETERS ([drills.behavioral_discrimination.native_params])
   grace_window_ms  int    ms to wait after Target Deactivated for a late impact.
   lapse_multiplier float  PVT-phase lapse threshold = median RT × this.
 """
@@ -46,7 +46,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .metrics import compute_metrics
+from metrics.discrimination import compute_metrics
 
 # Trial result constants
 HIT               = "hit"
@@ -59,12 +59,13 @@ PHASE_PVT  = "pvt"
 PHASE_DISC = "discrimination"
 
 
-def classify_target(name: str) -> Optional[str]:
+def classify_target(name: str, threat_suffixes=("_threat",),
+                    nonthreat_suffixes=("_nonthreat",)) -> Optional[str]:
     """Return "threat" / "nonthreat" for discrimination targets, else None."""
     n = (name or "").lower().strip()
-    if "_nonthreat" in n:
+    if any(n.endswith(suffix) for suffix in nonthreat_suffixes):
         return "nonthreat"
-    if "_threat" in n:
+    if any(n.endswith(suffix) for suffix in threat_suffixes):
         return "threat"
     return None
 
@@ -151,6 +152,8 @@ class DiscriminationTracker:
         self._pvt_targets:      list  = list(self._DEFAULT_PVT_TARGETS)
         self._grace_window_s:   float = self._DEFAULT_GRACE_WINDOW_MS / 1000.0
         self._lapse_multiplier: float = self._DEFAULT_LAPSE_MULTIPLIER
+        self._threat_suffixes = ("_threat",)
+        self._nonthreat_suffixes = ("_nonthreat",)
 
         # LSL inlet thread writes; asyncio grace callbacks read
         self._lock = threading.Lock()
@@ -168,6 +171,10 @@ class DiscriminationTracker:
             "pvt_targets", t.get("pvt_targets", self._DEFAULT_PVT_TARGETS))]
         self._grace_window_s   = p.get("grace_window_ms", self._DEFAULT_GRACE_WINDOW_MS) / 1000.0
         self._lapse_multiplier = p.get("lapse_multiplier", self._DEFAULT_LAPSE_MULTIPLIER)
+        self._threat_suffixes = tuple(str(item).casefold() for item in p.get(
+            "threat_suffixes", ("_threat",)))
+        self._nonthreat_suffixes = tuple(str(item).casefold() for item in p.get(
+            "nonthreat_suffixes", ("_nonthreat",)))
 
         with self._lock:
             self._active.clear()
@@ -245,7 +252,7 @@ class DiscriminationTracker:
         if not name or name in self._ignore_targets:
             return None
 
-        target_class = classify_target(name)
+        target_class = classify_target(name, self._threat_suffixes, self._nonthreat_suffixes)
         if target_class:
             return PHASE_DISC, target_class
 

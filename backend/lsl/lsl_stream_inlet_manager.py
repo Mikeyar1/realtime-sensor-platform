@@ -190,8 +190,12 @@ class LslStreamInletManager:
                     continue
                 print(f"[LslStreamInletManager] + New stream discovered: {info.name()!r} (type={info.type()}, uid={uid})")
                 try:
+                    def forward(name, stream_type, timestamp, sample,
+                                *, _uid=uid, _source_id=info.source_id()):
+                        return self._on_sample(name, stream_type, timestamp, sample,
+                                               outlet_uid=_uid, source_id=_source_id)
                     thread = LslInletWorkerThread(
-                        stream_info=info, on_sample=self._on_sample,
+                        stream_info=info, on_sample=forward,
                         pull_timeout=self._pull_timeout)
                     thread.start()
                 except Exception as e:
