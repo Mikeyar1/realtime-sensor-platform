@@ -467,7 +467,7 @@ class SessionLifecycleCoordinator:
     # ── Ingestion callbacks ───────────────────────────────────────────────────
 
     def on_sample(self, stream_name: str, stream_type: str, timestamp: float, data: list):
-        self._orchestrator.on_sample(stream_name, stream_type, timestamp, data)
+        return self._orchestrator.on_sample(stream_name, stream_type, timestamp, data)
 
     def on_catalog_changed(self, catalog: list):
         self._orchestrator.on_catalog_changed(catalog)
@@ -510,6 +510,7 @@ class SessionLifecycleCoordinator:
         return {
             "type":    MSG_STREAMS_CATALOG,
             "streams": catalog,
+            "health": self._inlets.get_health() if hasattr(self._inlets, "get_health") else {},
         }
 
     @staticmethod

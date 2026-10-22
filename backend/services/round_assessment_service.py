@@ -17,21 +17,33 @@ class RoundAssessmentService:
     def __init__(self, recent_limit: int = 4096):
         self._recent = deque(maxlen=recent_limit)
         self._recent_set: set[tuple] = set()
+        self._recent_raw_times: dict[tuple[str, ...], float] = {}
         self._last_terminal_id: str | None = None
 
     def accepts(self, timestamp: float, raw: list, *, scenario_id: str,
                 is_explicit_start: bool, drill_key: str = "") -> bool:
-        identity = (timestamp, tuple(str(item) for item in raw))
-        if identity in self._recent_set:
+        raw_key = tuple(str(item) for item in raw)
+        identity = (timestamp, raw_key)
+        previous = self._recent_raw_times.get(raw_key)
+        if identity in self._recent_set or (previous is not None and
+                                            abs(timestamp - previous) <= 0.01):
             return False
-        if drill_key in DRILLS and self._last_terminal_id is not None and (
+        # A script can reuse scenario_id for the next attempt (and on replay).
+        # Only an explicit start may reopen that terminal identity.
+        if drill_key in DRILLS and self._last_terminal_id is not None and not is_explicit_start and (
                 (scenario_id and scenario_id == self._last_terminal_id) or
-                (not scenario_id and not is_explicit_start)):
+                not scenario_id):
             return False
         if len(self._recent) == self._recent.maxlen:
-            self._recent_set.discard(self._recent.popleft())
+            evicted = self._recent.popleft()
+            self._recent_set.discard(evicted)
+            if self._recent_raw_times.get(evicted[1]) == evicted[0]:
+                del self._recent_raw_times[evicted[1]]
         self._recent.append(identity)
         self._recent_set.add(identity)
+        self._recent_raw_times[raw_key] = timestamp
+        if is_explicit_start:
+            self._last_terminal_id = None
         return True
 
     def begin(self, run_id: str, drill_key: str, scenario_name: str,

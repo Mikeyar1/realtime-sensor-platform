@@ -201,21 +201,24 @@ class VirTraScenarioOrchestrator:
         # Classify format first. The drill's metrics_source decides scoring.
         source = self._stream_config.stream_source(stream_name, stream_type)
         if source == "custom":
-            self._on_custom_lsl_sample(timestamp, data)
-            return
+            return self._on_custom_lsl_sample(timestamp, data)
 
         # 3. VirTra stream check
-        if source != "native" or len(data) < 1:
-            return
+        if source != "native":
+            return "unrecognized"
+        if len(data) < 1:
+            return "malformed"
 
         decoded = decode_native_lsl_sample(data)
         if decoded is None:
-            return
+            return "malformed"
         event_type = decoded.event_name
         description = decoded.description
         category = decoded.category
         metadata_raw = decoded.metadata_raw
         metadata_dict = decoded.metadata
+        decode_outcome = ("unrecognized" if decoded.metadata_format == "unrecognized"
+                          else None)
 
         print(f"[VirTraScenarioOrchestrator] VirTra > {event_type!r}  |  {description[:80]}")
 
@@ -253,7 +256,7 @@ class VirTraScenarioOrchestrator:
 
         # If no registered session is active, drop all further processing
         if self._active_drill is None:
-            return
+            return decode_outcome
 
         # Forward events to the active cognitive attribute tracker.
         # The tracker decides internally which event types it cares about.
@@ -278,6 +281,7 @@ class VirTraScenarioOrchestrator:
             "drill_key":   self._active_drill["drill_key"] if self._active_drill else "",
         }
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
+        return decode_outcome
 
     def _remember_native_start(self, timestamp: float, description: str, metadata_raw: str):
         scenario_name = _parse_metadata_field(metadata_raw, "Scenario") or description.strip()
@@ -349,7 +353,7 @@ class VirTraScenarioOrchestrator:
 
     def _on_custom_lsl_sample(self, timestamp: float, data: list):
         with self._event_lock:
-            self._process_custom_lsl_sample(timestamp, data)
+            return self._process_custom_lsl_sample(timestamp, data)
 
     def _process_custom_lsl_sample(self, timestamp: float, data: list):
         """
@@ -361,31 +365,34 @@ class VirTraScenarioOrchestrator:
         """
         event = decode_custom_lsl_sample(data)
         if event is None:
-            return
+            return "malformed"
         normalized = normalize_custom_event(event, timestamp, self._stream_config)
         if self._active_custom_session is not None:
             active_external_id = self._active_custom_session.scenario_id
             if active_external_id and event.scenario_id and event.scenario_id != active_external_id:
-                return
+                return "dropped"
             active_name = self._active_custom_scenario.casefold().strip()
             if (not active_external_id and active_name and event.scenario_name and
                     event.scenario_name.casefold().strip() != active_name):
-                return
+                return "dropped"
         stream_drill = self._stream_config.drill_for_custom_type(event.drill_type)
+        can_start_from_round = self._stream_config.custom_lifecycle.get(
+            "allow_round_start_without_scenario_start", False)
+        starts_run = (normalized.kind == EventKind.SCENARIO_START or
+                      (can_start_from_round and normalized.kind == EventKind.ROUND_START
+                       and self._active_custom_session is None))
         if not self._round_assessments.accepts(
                 timestamp, data, scenario_id=event.scenario_id,
-                is_explicit_start=normalized.kind == EventKind.SCENARIO_START,
+                is_explicit_start=starts_run,
                 drill_key=stream_drill.get("canonical_key", "") if stream_drill else ""):
-            return
+            return "dropped"
         if (self._active_custom_drill is not None and event.drill_type
                 and event.drill_type.casefold() !=
                 self._active_custom_drill.get("custom_lsl_type", "").casefold()):
-            return
+            return "dropped"
 
         print(f"[VirTraScenarioOrchestrator] CustomLSL > {event.event_name!r} | {event.event_description[:80]}")
 
-        can_start_from_round = self._stream_config.custom_lifecycle.get(
-            "allow_round_start_without_scenario_start", False)
         if (normalized.kind == EventKind.SCENARIO_START or
                 (can_start_from_round and normalized.kind == EventKind.ROUND_START)) and self._active_custom_session is None:
             self._handle_custom_lsl_scenario_started(timestamp, event)
@@ -418,6 +425,7 @@ class VirTraScenarioOrchestrator:
 
         if normalized.kind == EventKind.SCENARIO_STOP:
             self._handle_custom_lsl_scenario_stopped(timestamp, event)
+        return "unrecognized" if stream_drill is None else None
 
     def _persist_custom_rounds(self):
         tracker = self._active_custom_session

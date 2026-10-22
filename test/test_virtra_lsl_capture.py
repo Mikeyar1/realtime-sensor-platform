@@ -82,6 +82,8 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(lines[1]["event_name"], "Round Started")
         self.assertEqual(lines[1]["fields"], json.loads(self.custom[3]))
         generator_root = Path(__file__).resolve().parents[1] / "Labreview-data-generator-python"
+        if not generator_root.is_dir():
+            self.skipTest("optional Labreview-data-generator-python checkout is absent")
         with patch.object(sys, "path", [str(generator_root), *sys.path]):
             from src.parser.virtra_jsonl import parse_virtra_jsonl
             parsed = parse_virtra_jsonl(output)

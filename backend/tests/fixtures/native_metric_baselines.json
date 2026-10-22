@@ -1,0 +1,29 @@
+{
+  "format": "labreview.synthetic_trials.v1",
+  "note": "Synthetic, sanitized trial inputs. These characterize current no-round native metric output; they are not raw VirTra captures.",
+  "pvt": {
+    "trials": [
+      {"trial_number": 1, "result": "hit", "rt_ms": 200},
+      {"trial_number": 2, "result": "miss", "rt_ms": 400},
+      {"trial_number": 3, "result": "omission", "rt_ms": null}
+    ],
+    "expected": {"total_trials": 3, "hits": 1, "misses": 1, "omissions": 1, "rt_median_ms": 300.0, "response_rate_pct": 66.7, "accuracy_pct": 50.0}
+  },
+  "gng": {
+    "trials": [
+      {"trial_number": 1, "target_type": "go", "result": "hit", "rt_ms": 300},
+      {"trial_number": 2, "target_type": "go", "result": "omission"},
+      {"trial_number": 3, "target_type": "no_go", "result": "false_alarm"},
+      {"trial_number": 4, "target_type": "no_go", "result": "correct_rejection"}
+    ],
+    "expected": {"total_trials": 4, "hits": 1, "omissions": 1, "false_alarms": 1, "correct_rejections": 1, "rt_median_ms": 300, "hit_rate": 50.0, "false_alarm_rate": 50.0, "overall_accuracy_pct": 50.0}
+  },
+  "discrimination": {
+    "trials": [
+      {"trial_number": 1, "phase": "pvt", "result": "hit", "rt_ms": 250},
+      {"trial_number": 2, "phase": "discrimination", "target_class": "threat", "result": "hit", "rt_ms": 600},
+      {"trial_number": 3, "phase": "discrimination", "target_class": "nonthreat", "result": "correct_rejection"}
+    ],
+    "expected": {"total_trials": 2, "pvt.rt_median_ms": 250, "discrimination.threat_hit_rate_pct": 100.0, "discrimination.correct_rejection_rate_pct": 100.0}
+  }
+}

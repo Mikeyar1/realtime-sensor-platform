@@ -190,7 +190,7 @@ def _outlet(info: dict):
 
 
 def _replay_outlets(streams: dict[str, dict]) -> dict[str, object]:
-    """Coalesce restarted outlets because LabReview subscribes by stream name."""
+    """Coalesce restarted capture outlets for one name-based replay subscription."""
     by_name: dict[str, tuple[dict, object]] = {}
     by_id: dict[str, object] = {}
     identity_fields = ("type", "source_id", "channel_count", "nominal_srate",
