@@ -52,14 +52,16 @@ class RoundAssessmentService:
               external_scenario_id: str, timestamp: float,
               assessment_selection: dict | None = None) -> None:
         binding = DRILLS.get(drill_key)
-        if binding is None or not round_repository.available():
+        if not round_repository.available():
             return
         if assessment_selection:
             self._selection_by_run[run_id] = dict(assessment_selection)
-        profile = CATEGORIES[binding.category_id].profile
+        profile = CATEGORIES[binding.category_id].profile if binding else None
         round_repository.capture_run(
-            run_id, drill_key=binding.id, category_id=binding.category_id,
-            profile_id=profile.id, profile_version=profile.version,
+            run_id, drill_key=drill_key,
+            category_id=binding.category_id if binding else drill_key,
+            profile_id=profile.id if profile else drill_key,
+            profile_version=profile.version if profile else 1,
             scenario_name=scenario_name, external_scenario_id=external_scenario_id,
             source="custom", started_at=timestamp)
 
@@ -87,7 +89,7 @@ class RoundAssessmentService:
             reason: str, external_scenario_id: str,
             source: str = "custom") -> list[dict]:
         results = self.checkpoint(run_id, drill_key, tracker)
-        if drill_key in DRILLS and round_repository.available():
+        if round_repository.available():
             round_repository.close_run(run_id, timestamp, reason, source)
         self._selection_by_run.pop(run_id, None)
         self._last_terminal_id = external_scenario_id

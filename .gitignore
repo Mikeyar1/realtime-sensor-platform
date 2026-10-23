@@ -31,4 +31,6 @@ docs/
 inspect_v300.py
 record_multicolor_gng.py
 
-tools
+test/
+
+/frontend/tests/

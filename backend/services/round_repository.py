@@ -122,6 +122,15 @@ def install(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(assessment_runs)")}
     if "ended_source" not in columns:
         conn.execute("ALTER TABLE assessment_runs ADD COLUMN ended_source TEXT NOT NULL DEFAULT ''")
+    for name, definition in {
+        "external_session_id": "TEXT NOT NULL DEFAULT ''",
+        "log_capture_id": "TEXT NOT NULL DEFAULT ''",
+        "log_started_at": "REAL",
+        "log_ended_at": "REAL",
+        "log_status": "TEXT NOT NULL DEFAULT 'not_recorded'",
+    }.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE assessment_runs ADD COLUMN {name} {definition}")
     round_columns = {row[1] for row in conn.execute("PRAGMA table_info(assessment_rounds)")}
     if "physiology_json" not in round_columns:
         conn.execute("ALTER TABLE assessment_rounds ADD COLUMN physiology_json TEXT NOT NULL DEFAULT '{}'")
@@ -156,6 +165,29 @@ def capture_run(run_id: str, *, drill_key: str, category_id: str,
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (run_id, drill_key, category_id, profile_id, profile_version,
                  scenario_name, external_scenario_id, source, started_at))
+
+
+def attach_session_log(run_id: str, capture_id: str, started_at: float,
+                       external_session_id: str = "") -> None:
+    """Attach one backend capture to an existing canonical assessment session."""
+    with database._lock:
+        with database._connect() as conn:
+            changed = conn.execute("""UPDATE assessment_runs SET log_capture_id = ?,
+                log_started_at = CASE WHEN log_started_at IS NULL THEN ?
+                    ELSE MIN(log_started_at, ?) END,
+                external_session_id = ?, log_status = 'recording'
+                WHERE id = ?""",
+                (capture_id, started_at, started_at, external_session_id, run_id))
+            if changed.rowcount != 1:
+                raise ValueError(f"Assessment session {run_id!r} does not exist")
+
+
+def close_session_log(run_id: str, ended_at: float, *, complete: bool) -> None:
+    with database._lock:
+        with database._connect() as conn:
+            conn.execute("""UPDATE assessment_runs SET log_ended_at = ?,
+                log_status = ? WHERE id = ?""",
+                (ended_at, "complete" if complete else "incomplete", run_id))
 
 
 def capture_round(run_id: str, round_record: dict, trials: list[dict] | None = None,

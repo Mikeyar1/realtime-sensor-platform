@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 from assessments.events import normalize_custom_event
 
 
@@ -22,13 +20,12 @@ class EventAttributor:
     def __init__(self, store, registry):
         self.store = store
         self.registry = registry
-        self._native_run_id: str | None = None
         self._pending_native: list[tuple[str, object]] = []
 
     def route(self, event_id: str, event, outcome: str | None,
               orchestrator, timestamp: float, *, before_custom_run: str = "",
               before_custom_scenario_id: str = "",
-              before_native_active: bool = False,
+              before_native_run_id: str = "",
               before_native_scenario: str = "",
               before_context_matched: bool = False,
               before_round_id: str | None = None) -> None:
@@ -46,13 +43,8 @@ class EventAttributor:
         if event.source == "custom" and active_custom_id and match.scenario_id != active_custom_id:
             return
 
-        native_active = orchestrator._active_drill is not None
         if event.source == "native" and match.role == "primary":
-            if native_active and event.event_name == "Scenario Started" and (
-                    not before_native_active or
-                    before_native_scenario != orchestrator._active_scenario):
-                self._native_run_id = str(uuid.uuid4())
-            run_id = self._native_run_id
+            run_id = orchestrator._session_id or before_native_run_id
         elif event.source == "custom":
             run_id = orchestrator._custom_session_id or before_custom_run
         else:
@@ -93,6 +85,3 @@ class EventAttributor:
                                         scenario_id=match.scenario_id,
                                         scenario_revision=match.revision)
                 self._pending_native.clear()
-
-        if event.source == "native" and match.role == "primary" and before_native_active and not native_active:
-            self._native_run_id = None

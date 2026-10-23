@@ -870,8 +870,7 @@ LabReview.LiveIntelPage = (function () {
             `<div class="li-round-head"><h2>Current round</h2></div>` +
             `<p></p></div>`;
         }
-        currentEl.querySelector('.li-round-waiting p').textContent = ended.length
-          ? 'Waiting for next round' : 'Waiting for first round';
+        currentEl.querySelector('.li-round-waiting p').textContent = 'Waiting for round to start';
         currentEl.style.display = '';
       } else {
         if (_assessmentActiveKey) currentEl.replaceChildren();

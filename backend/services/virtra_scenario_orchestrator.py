@@ -117,6 +117,7 @@ class VirTraScenarioOrchestrator:
         self._active_scenario: Optional[str] = None
         self._session_started_at: Optional[float] = None
         self._session_id: str = ""
+        self._native_external_session_id: str = ""
 
         # Simulator metadata captured at scenario start
         self._simulator: str = ""
@@ -761,7 +762,19 @@ class VirTraScenarioOrchestrator:
                 return
             self._biosignals.reset()
             self._session_started_at = timestamp
-            self._session_id = _parse_metadata_field(metadata_raw, "SessionID") or ""
+            self._session_id = str(uuid.uuid4())
+            self._native_external_session_id = (
+                _parse_metadata_field(metadata_raw, "SessionID") or "")
+            if round_repository.available():
+                round_repository.capture_run(
+                    self._session_id, drill_key=drill_info["drill_key"],
+                    category_id=drill_info.get("category_id") or task_type.casefold(),
+                    profile_id=drill_info.get("assessment_profile") or
+                               drill_info["trial_adapter"],
+                    profile_version=1, scenario_name=scenario_name,
+                    external_scenario_id=(
+                        _parse_metadata_field(metadata_raw, "ScenarioID") or ""),
+                    source="native", started_at=timestamp)
             self._weapon_type_seen = False
             self._weapon_type = ""
 
@@ -836,7 +849,7 @@ class VirTraScenarioOrchestrator:
             return
 
         scenario_name = _parse_metadata_field(metadata_raw, "Scenario") or self._active_scenario or ""
-        session_id = _parse_metadata_field(metadata_raw, "SessionID") or self._session_id
+        session_id = self._session_id
 
         drill_key_for_analysis = self._active_drill["drill_key"]
         task_type_for_analysis = self._active_drill["task_type"]
@@ -860,6 +873,9 @@ class VirTraScenarioOrchestrator:
 
         self._active_drill = None
         self._active_scenario = None
+        if round_repository.available():
+            round_repository.close_run(session_id, timestamp,
+                                       "manual" if manual else "scenario_stopped", "native")
 
         # Take physiological snapshot (full-session averages, not rolling window)
         biosignals = self._biosignals.snapshot_biosignals()
@@ -925,6 +941,7 @@ class VirTraScenarioOrchestrator:
         self._active_tracker = None
         self._session_started_at = None
         self._session_id = ""
+        self._native_external_session_id = ""
         self._native_context = {}
         self._run_source = None
 

@@ -1,9 +1,10 @@
-"""Bounded, append-only event writer. High-rate physiology is excluded."""
+"""Bounded raw LSL event and physiology writer for later session review."""
 
 from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import queue
 import sqlite3
 import threading
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS capture_sessions (
     ended_at TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     lost_events INTEGER NOT NULL DEFAULT 0,
+    lost_signals INTEGER NOT NULL DEFAULT 0,
     writer_errors INTEGER NOT NULL DEFAULT 0,
     processing_errors INTEGER NOT NULL DEFAULT 0
 );
@@ -60,6 +62,25 @@ CREATE TABLE IF NOT EXISTS assessment_event_links (
 );
 CREATE INDEX IF NOT EXISTS idx_assessment_event_links_run
     ON assessment_event_links(run_id, round_id, event_id);
+CREATE TABLE IF NOT EXISTS lsl_signal_log (
+    id TEXT PRIMARY KEY,
+    capture_id TEXT NOT NULL REFERENCES capture_sessions(id),
+    ingest_sequence INTEGER NOT NULL,
+    session_id TEXT REFERENCES assessment_runs(id) ON DELETE SET NULL,
+    outlet_uid TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    stream_name TEXT NOT NULL,
+    stream_type TEXT NOT NULL,
+    signal_config_id TEXT NOT NULL,
+    lsl_timestamp REAL NOT NULL,
+    received_at TEXT NOT NULL,
+    raw_channels_json TEXT NOT NULL,
+    UNIQUE(capture_id, ingest_sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_lsl_signal_session_time
+    ON lsl_signal_log(session_id, lsl_timestamp, ingest_sequence);
+CREATE INDEX IF NOT EXISTS idx_lsl_signal_capture_time
+    ON lsl_signal_log(capture_id, lsl_timestamp);
 """
 
 
@@ -69,6 +90,44 @@ def install(conn: sqlite3.Connection) -> None:
     if "processing_errors" not in columns:
         conn.execute("""ALTER TABLE capture_sessions ADD COLUMN processing_errors
             INTEGER NOT NULL DEFAULT 0""")
+    if "lost_signals" not in columns:
+        conn.execute("ALTER TABLE capture_sessions ADD COLUMN lost_signals INTEGER NOT NULL DEFAULT 0")
+    event_columns = {row[1] for row in conn.execute("PRAGMA table_info(lsl_event_log)")}
+    if "session_id" not in event_columns:
+        conn.execute("ALTER TABLE lsl_event_log ADD COLUMN session_id TEXT")
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_lsl_event_session_time
+            ON lsl_event_log(session_id, lsl_timestamp, ingest_sequence);
+        CREATE VIEW IF NOT EXISTS v_session_event_log AS
+            SELECT session_id, id AS event_id, capture_id, ingest_sequence,
+                   outlet_uid, source_id, stream_name, stream_type, source_kind,
+                   lsl_timestamp, received_at, raw_channels_json, decode_status,
+                   decode_error, decoded_event_json, decoder_version
+            FROM lsl_event_log WHERE session_id IS NOT NULL;
+        CREATE VIEW IF NOT EXISTS v_round_event_log AS
+            SELECT r.id AS round_id, r.round_number, r.attempt,
+                   e.session_id, e.event_id, e.capture_id, e.ingest_sequence,
+                   e.outlet_uid, e.source_id, e.stream_name, e.stream_type,
+                   e.source_kind, e.lsl_timestamp, e.received_at,
+                   e.raw_channels_json, e.decode_status, e.decoded_event_json
+            FROM v_session_event_log e JOIN assessment_rounds r
+              ON r.run_id = e.session_id AND e.lsl_timestamp >= r.started_at
+             AND (r.ended_at IS NULL OR e.lsl_timestamp <= r.ended_at);
+        CREATE VIEW IF NOT EXISTS v_session_signal_log AS
+            SELECT session_id, id AS sample_id, capture_id, ingest_sequence,
+                   outlet_uid, source_id, stream_name, stream_type,
+                   signal_config_id, lsl_timestamp, received_at, raw_channels_json
+            FROM lsl_signal_log WHERE session_id IS NOT NULL;
+        CREATE VIEW IF NOT EXISTS v_round_signal_log AS
+            SELECT r.id AS round_id, r.round_number, r.attempt,
+                   s.session_id, s.sample_id, s.capture_id, s.ingest_sequence,
+                   s.outlet_uid, s.source_id, s.stream_name, s.stream_type,
+                   s.signal_config_id, s.lsl_timestamp, s.received_at,
+                   s.raw_channels_json
+            FROM v_session_signal_log s JOIN assessment_rounds r
+              ON r.run_id = s.session_id AND s.lsl_timestamp >= r.started_at
+             AND (r.ended_at IS NULL OR s.lsl_timestamp <= r.ended_at);
+    """)
 
 
 def _utc_now() -> str:
@@ -85,12 +144,17 @@ class EventStore:
         self._queue: queue.Queue = queue.Queue(maxsize=max_queue)
         self._lock = threading.Lock()
         self._sequence = 0
+        self._signal_sequence = 0
         self._lost = 0
+        self._lost_signals = 0
         self._errors = 0
         self._processing_errors = 0
         self._last_error = ""
         self._closed = False
         with self._connection() as conn:
+            conn.execute("""UPDATE assessment_runs SET log_status = 'incomplete'
+                WHERE log_status = 'recording' AND log_capture_id IN
+                (SELECT id FROM capture_sessions WHERE status = 'active')""")
             conn.execute("""UPDATE capture_sessions SET status = 'interrupted',
                 ended_at = ? WHERE status = 'active'""", (_utc_now(),))
             conn.execute("""INSERT INTO capture_sessions
@@ -154,6 +218,59 @@ class EventStore:
                 return False
         return True
 
+    def append_signal(self, *, outlet_uid: str, stream_name: str, stream_type: str,
+                      source_id: str, signal_config_id: str, lsl_timestamp: float,
+                      channels: list, session_id: str = "") -> bool:
+        """Queue raw physiological channels before validity filtering."""
+        def json_value(value):
+            if isinstance(value, float) and not math.isfinite(value):
+                return str(value)
+            return value
+
+        with self._lock:
+            if self._closed or self._errors:
+                self._lost_signals += 1
+                return False
+            sequence = self._signal_sequence + 1
+            row = (str(uuid.uuid4()), self.capture_id, sequence,
+                   session_id or None, outlet_uid or "", source_id or "",
+                   stream_name, stream_type, signal_config_id, lsl_timestamp,
+                   _utc_now(), json.dumps([json_value(item) for item in channels],
+                                          ensure_ascii=False, allow_nan=False))
+            try:
+                self._queue.put_nowait(("signal", row))
+            except queue.Full:
+                self._lost_signals += 1
+                return False
+            self._signal_sequence = sequence
+        return True
+
+    def assign_event_session(self, event_id: str, session_id: str) -> bool:
+        return self._enqueue("event_session", (session_id, event_id))
+
+    def assign_signal_window(self, session_id: str, started_at: float,
+                             ended_at: float) -> bool:
+        """Retroactively include sensor samples captured before run recognition."""
+        return self._enqueue("signal_window", (session_id, self.capture_id,
+                                                started_at, ended_at))
+
+    def assign_event_window(self, session_id: str, source_kind: str,
+                            started_at: float, ended_at: float) -> bool:
+        return self._enqueue("event_window", (session_id, self.capture_id,
+                                               source_kind, started_at, ended_at))
+
+    def _enqueue(self, kind: str, row: tuple) -> bool:
+        with self._lock:
+            if self._closed or self._errors:
+                self._lost += 1
+                return False
+            try:
+                self._queue.put_nowait((kind, row))
+            except queue.Full:
+                self._lost += 1
+                return False
+        return True
+
     def _write_loop(self):
         while True:
             command = self._queue.get()
@@ -176,18 +293,41 @@ class EventStore:
                 with self._connection() as conn:
                     for kind, row in batch:
                         if kind == "event":
-                            conn.execute("""INSERT INTO lsl_event_log VALUES
-                                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
-                        else:
+                            conn.execute("""INSERT INTO lsl_event_log
+                                (id, capture_id, ingest_sequence, outlet_uid, stream_name,
+                                 stream_type, source_id, source_kind, lsl_timestamp,
+                                 received_at, raw_channels_json, decode_status,
+                                 decode_error, decoded_event_json, decoder_version)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
+                        elif kind == "link":
                             conn.execute("""INSERT OR IGNORE INTO assessment_event_links
                                 (event_id, run_id, round_id, evidence_role,
                                  attribution_decision, attribution_reason,
                                  scenario_id, scenario_revision)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", row)
+                        elif kind == "signal":
+                            conn.execute("""INSERT INTO lsl_signal_log
+                                (id, capture_id, ingest_sequence, session_id, outlet_uid,
+                                 source_id, stream_name, stream_type, signal_config_id,
+                                 lsl_timestamp, received_at, raw_channels_json)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", row)
+                        elif kind == "event_session":
+                            conn.execute("""UPDATE lsl_event_log SET session_id = ?
+                                WHERE id = ? AND session_id IS NULL""", row)
+                        elif kind == "signal_window":
+                            conn.execute("""UPDATE lsl_signal_log SET session_id = ?
+                                WHERE capture_id = ? AND lsl_timestamp BETWEEN ? AND ?
+                                  AND session_id IS NULL""", row)
+                        elif kind == "event_window":
+                            conn.execute("""UPDATE lsl_event_log SET session_id = ?
+                                WHERE capture_id = ? AND source_kind = ?
+                                  AND lsl_timestamp BETWEEN ? AND ?
+                                  AND session_id IS NULL""", row)
             except Exception as exc:
                 with self._lock:
                     self._errors += 1
                     self._lost += sum(kind == "event" for kind, _ in batch)
+                    self._lost_signals += sum(kind == "signal" for kind, _ in batch)
                     self._last_error = str(exc)
             finally:
                 for _ in batch:
@@ -209,11 +349,13 @@ class EventStore:
                 except FileNotFoundError:
                     pass  # WAL may disappear during a checkpoint.
             return {"capture_id": self.capture_id, "queued": self._queue.qsize(),
-                    "lost_events": self._lost, "writer_errors": self._errors,
+                    "lost_events": self._lost, "lost_signals": self._lost_signals,
+                    "writer_errors": self._errors,
                     "processing_errors": self._processing_errors,
                     "database_bytes": stored_bytes,
                     "last_error": self._last_error,
-                    "complete": self._lost == 0 and self._errors == 0 and
+                    "complete": self._lost == 0 and self._lost_signals == 0 and
+                                self._errors == 0 and
                                 self._processing_errors == 0}
 
     def mark_processing_error(self, exc: Exception) -> None:
@@ -232,10 +374,14 @@ class EventStore:
         status = self.health()
         with self._connection() as conn:
             conn.execute("""UPDATE capture_sessions SET ended_at = ?, status = ?,
-                lost_events = ?, writer_errors = ?, processing_errors = ? WHERE id = ?""",
+                lost_events = ?, lost_signals = ?, writer_errors = ?,
+                processing_errors = ? WHERE id = ?""",
                 (_utc_now(), "complete" if status["complete"] else "incomplete",
-                 status["lost_events"], status["writer_errors"],
+                 status["lost_events"], status["lost_signals"], status["writer_errors"],
                  status["processing_errors"], self.capture_id))
+            conn.execute("""UPDATE assessment_runs SET log_status = 'incomplete'
+                WHERE log_capture_id = ? AND log_status = 'recording'""",
+                (self.capture_id,))
 
     def get_capture_events(self, capture_id: str, *, limit: int = 1000,
                            after_sequence: int = 0) -> list[dict]:

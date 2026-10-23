@@ -21,6 +21,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections import deque
 from typing import Callable, Optional
 
 from api.message_types import (
@@ -147,6 +148,8 @@ class SessionLifecycleCoordinator:
         self._loop      = loop
         self._event_store = event_store
         self._ingest_lock = threading.RLock()
+        self._recent_log_sessions: deque[tuple[str, float, float]] = deque(maxlen=8)
+        self._log_start_by_run: dict[str, float] = {}
 
         # Live session state
         self._state:           str   = STATE_IDLE
@@ -182,7 +185,18 @@ class SessionLifecycleCoordinator:
             await self._orchestrator.handle_live_deactivate(websocket)
 
         elif msg_type == "session.stop":
-            if self._orchestrator.stop_active_drill():
+            with self._ingest_lock:
+                router = self._orchestrator
+                run_id = router._custom_session_id or router._session_id
+                source = "custom" if router._custom_session_id else "native"
+                started_at = (router._custom_session_started_at if source == "custom"
+                              else router._session_started_at)
+                stopped = router.stop_active_drill()
+                if stopped and run_id and self._event_store:
+                    ended_at = (router.get_last_session_metadata() or {}).get("stopped_at")
+                    if ended_at is not None:
+                        self._finish_log(run_id, source, started_at or ended_at, ended_at)
+            if stopped:
                 await self._orchestrator.handle_live_deactivate(websocket)
             else:
                 await self._send(websocket, self._error(
@@ -506,14 +520,35 @@ class SessionLifecycleCoordinator:
     def on_sample(self, stream_name: str, stream_type: str, timestamp: float, data: list,
                   *, outlet_uid: str = "", source_id: str = ""):
         source = self._orchestrator._stream_config.stream_source(stream_name, stream_type)
-        if source not in {"custom", "native"} or self._event_store is None:
+        if self._event_store is None:
             return self._orchestrator.on_sample(stream_name, stream_type, timestamp, data,
                                                 outlet_uid=outlet_uid, source_id=source_id)
-        # Sequence assignment, lifecycle routing, and link attribution must
-        # share one order across native and custom worker threads for replay.
+        # All inlet workers share one order for capture and lifecycle routing.
         with self._ingest_lock:
-            return self._audit_and_route(stream_name, stream_type, timestamp, data,
-                                         source, outlet_uid, source_id)
+            if source in {"custom", "native"}:
+                return self._audit_and_route(stream_name, stream_type, timestamp, data,
+                                             source, outlet_uid, source_id)
+            spec = self._orchestrator._physiology.registry.match(
+                stream_name, stream_type, source_id)
+            if spec:
+                router = self._orchestrator
+                session_id = router._custom_session_id or router._session_id
+                active_start = (router._custom_session_started_at if router._custom_session_id
+                                else router._session_started_at)
+                if not session_id or (active_start is not None and timestamp < active_start):
+                    session_id = next((run_id for run_id, start, end
+                                       in reversed(self._recent_log_sessions)
+                                       if start <= timestamp <= end), "")
+                recorded = self._event_store.append_signal(
+                    outlet_uid=outlet_uid, stream_name=stream_name,
+                    stream_type=stream_type, source_id=source_id,
+                    signal_config_id=spec["id"], lsl_timestamp=timestamp,
+                    channels=data, session_id=session_id)
+                if not recorded:
+                    return "dropped"
+            return self._orchestrator.on_sample(
+                stream_name, stream_type, timestamp, data,
+                outlet_uid=outlet_uid, source_id=source_id)
 
     def _audit_and_route(self, stream_name, stream_type, timestamp, data,
                          source, outlet_uid, source_id):
@@ -524,13 +559,19 @@ class SessionLifecycleCoordinator:
             source_event=event)
         if event_id is None:
             return "dropped"  # never score an event without an audit identity
-        if event.status != "decoded":
-            return event.status
         router = self._orchestrator
+        active_id = (router._custom_session_id if source == "custom" else
+                     router._session_id if router._active_drill is not None else "")
+        if event.status != "decoded":
+            if active_id:
+                self._event_store.assign_event_session(event_id, active_id)
+            return event.status
         before_custom_run = router._custom_session_id
+        before_native_run = router._session_id if router._active_drill is not None else ""
+        before_custom_start = router._custom_session_started_at
+        before_native_start = router._session_started_at
         before_custom_scenario_id = (router._active_custom_drill or {}).get(
             "stream_policy", {}).get("scenario_id", "")
-        before_native_active = router._active_drill is not None
         before_native_scenario = router._active_scenario or ""
         before_context_matched = router._custom_context.get("context_match_status") in {
             "matched_name", "matched_alias"}
@@ -544,14 +585,62 @@ class SessionLifecycleCoordinator:
                 event_id, event, outcome, router, timestamp,
                 before_custom_run=before_custom_run,
                 before_custom_scenario_id=before_custom_scenario_id,
-                before_native_active=before_native_active,
+                before_native_run_id=before_native_run,
                 before_native_scenario=before_native_scenario,
                 before_context_matched=before_context_matched,
                 before_round_id=before_round_id)
+            after_custom_run = router._custom_session_id
+            after_native_run = router._session_id if router._active_drill is not None else ""
+            matched_context = router._custom_context.get("context_match_status") in {
+                "matched_name", "matched_alias"}
+            run_id = ((after_custom_run or before_custom_run) if source == "custom"
+                      else (after_native_run or before_native_run or
+                            ((after_custom_run or before_custom_run)
+                             if matched_context or before_context_matched else "")))
+            if run_id:
+                self._event_store.assign_event_session(event_id, run_id)
+            if after_custom_run and after_custom_run != before_custom_run:
+                context = router._custom_context
+                native_start = context.get("started_at") if matched_context else None
+                start = min(timestamp, native_start) if native_start is not None else timestamp
+                self._log_start_by_run[after_custom_run] = start
+                round_repository.attach_session_log(
+                    after_custom_run, self._event_store.capture_id, start,
+                    context.get("native_session_id", "") if matched_context else "")
+                self._event_store.assign_signal_window(after_custom_run, start, timestamp)
+                self._event_store.assign_event_window(
+                    after_custom_run, "custom", start, timestamp)
+                if native_start is not None:
+                    self._event_store.assign_event_window(
+                        after_custom_run, "native", native_start, timestamp)
+            if after_native_run and after_native_run != before_native_run:
+                self._log_start_by_run[after_native_run] = timestamp
+                round_repository.attach_session_log(
+                    after_native_run, self._event_store.capture_id, timestamp,
+                    router._native_external_session_id)
+                self._event_store.assign_signal_window(after_native_run, timestamp, timestamp)
+            if before_custom_run and not after_custom_run:
+                self._finish_log(before_custom_run, "custom",
+                                 before_custom_start or timestamp, timestamp,
+                                 native_context=before_context_matched)
+            if before_native_run and not after_native_run:
+                self._finish_log(before_native_run, "native",
+                                 before_native_start or timestamp, timestamp)
         except Exception as exc:
             self._event_store.mark_processing_error(exc)
             raise
         return outcome
+
+    def _finish_log(self, run_id: str, source: str, started_at: float,
+                    ended_at: float, *, native_context: bool = False) -> None:
+        started_at = self._log_start_by_run.pop(run_id, started_at)
+        self._event_store.assign_signal_window(run_id, started_at, ended_at)
+        self._event_store.assign_event_window(run_id, source, started_at, ended_at)
+        if native_context:
+            self._event_store.assign_event_window(run_id, "native", started_at, ended_at)
+        self._recent_log_sessions.append((run_id, started_at, ended_at))
+        complete = self._event_store.flush()
+        round_repository.close_session_log(run_id, ended_at, complete=complete)
 
     def on_catalog_changed(self, catalog: list):
         self._orchestrator.on_catalog_changed(catalog)

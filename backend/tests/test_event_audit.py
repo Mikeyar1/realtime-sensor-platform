@@ -37,6 +37,63 @@ def native(name, scenario="PVT"):
 
 
 class EventAuditTests(unittest.TestCase):
+    def test_session_raw_logs_can_be_queried_by_round(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "audit.db")
+            database.init_db(path)
+            store = EventStore(path)
+
+            async def send(*args):
+                pass
+
+            async def run():
+                coordinator = SessionLifecycleCoordinator(
+                    inlet_manager={}, broadcast_fn=send, send_fn=send,
+                    loop=asyncio.get_running_loop(), event_store=store)
+                ingest = coordinator.on_sample
+                ingest("V_300", "VirTraEvents", 1,
+                       native("Scenario Started", "Fitts-PVT_Clay"))
+                ingest("Polar HR", "HR", 1.5, [72], source_id="heart")
+                ingest("virtra_lsl", "VirTra Events", 2,
+                       custom("Scenario Started"))
+                run_id = coordinator._orchestrator._custom_session_id
+                ingest("virtra_lsl", "VirTra Events", 3,
+                       custom("Round Started", 1))
+                ingest("Polar HR", "HR", 3.5, [74], source_id="heart")
+                ingest("virtra_lsl", "VirTra Events", 4,
+                       custom("Round Completed", 1))
+                ingest("Polar HR", "HR", 4.5, [75], source_id="heart")
+                ingest("virtra_lsl", "VirTra Events", 5,
+                       custom("Round Started", 2))
+                ingest("Polar HR", "HR", 5.5, [76], source_id="heart")
+                ingest("Polar HR", "HR", 5.6, [999], source_id="heart")
+                ingest("virtra_lsl", "VirTra Events", 5.7,
+                       ["Shot Fired", "", "", "{bad"])
+                ingest("virtra_lsl", "VirTra Events", 6,
+                       custom("Round Completed", 2))
+                ingest("virtra_lsl", "VirTra Events", 7,
+                       custom("Scenario Stopped"))
+                self.assertTrue(store.flush())
+                with closing(sqlite3.connect(path)) as conn:
+                    session = conn.execute("""SELECT log_capture_id, log_started_at,
+                        log_status FROM assessment_runs WHERE id = ?""", (run_id,)).fetchone()
+                    self.assertEqual(session, (store.capture_id, 1.0, "complete"))
+                    self.assertEqual(conn.execute("""SELECT COUNT(*) FROM v_session_signal_log
+                        WHERE session_id = ?""", (run_id,)).fetchone()[0], 5)
+                    rounds = conn.execute("""SELECT id, round_number FROM assessment_rounds
+                        WHERE run_id = ? ORDER BY round_number""", (run_id,)).fetchall()
+                    self.assertEqual([row[1] for row in rounds], [1, 2])
+                    self.assertEqual([conn.execute("""SELECT COUNT(*) FROM v_round_signal_log
+                        WHERE round_id = ?""", (row[0],)).fetchone()[0]
+                                      for row in rounds], [1, 2])
+                    self.assertEqual(conn.execute("""SELECT COUNT(*) FROM v_round_event_log
+                        WHERE round_id = ?""", (rounds[0][0],)).fetchone()[0], 2)
+                    self.assertEqual(conn.execute("""SELECT decode_status FROM v_round_event_log
+                        WHERE round_id = ? AND lsl_timestamp = 5.7""",
+                        (rounds[1][0],)).fetchone()[0], "malformed")
+            asyncio.run(run())
+            store.close()
+
     def test_append_link_query_and_replay_are_ordered(self):
         with tempfile.TemporaryDirectory() as folder:
             path = str(Path(folder) / "audit.db")
@@ -132,6 +189,8 @@ class EventAuditTests(unittest.TestCase):
                        ["Shot Fired", "", "", "{bad"], outlet_uid="custom-uid")
                 ingest("V_300", "VirTraEvents", 8,
                        native("Scenario Started", "PVT"), outlet_uid="native-uid")
+                native_run_id = coordinator._orchestrator._session_id
+                ingest("Polar HR", "HR", 8.5, [70], source_id="heart")
                 ingest("V_300", "VirTraEvents", 9,
                        native("Scenario Stopped", "PVT"), outlet_uid="native-uid")
                 ingest("V_300", "VirTraEvents", 10,
@@ -154,6 +213,13 @@ class EventAuditTests(unittest.TestCase):
                 with closing(sqlite3.connect(path)) as conn:
                     native_runs = conn.execute("""SELECT DISTINCT run_id FROM assessment_event_links
                         WHERE scenario_id = 'pvt'""").fetchall()
+                    self.assertEqual(native_runs, [(native_run_id,)])
+                    self.assertEqual(conn.execute("""SELECT source, external_session_id,
+                        log_status FROM assessment_runs WHERE id = ?""",
+                        (native_run_id,)).fetchone(),
+                        ("native", "native-session", "complete"))
+                    self.assertEqual(conn.execute("""SELECT COUNT(*) FROM v_session_signal_log
+                        WHERE session_id = ?""", (native_run_id,)).fetchone()[0], 1)
                 self.assertEqual(len(native_runs), 1)
                 native_rows = store.get_run_events(native_runs[0][0])
                 self.assertEqual(len(native_rows), 2)
