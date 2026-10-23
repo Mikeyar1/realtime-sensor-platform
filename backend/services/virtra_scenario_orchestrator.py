@@ -391,7 +391,13 @@ class VirTraScenarioOrchestrator:
 
         if (normalized.kind == EventKind.SCENARIO_START or
                 (can_start_from_round and normalized.kind == EventKind.ROUND_START)) and self._active_custom_session is None:
-            self._handle_custom_lsl_scenario_started(timestamp, event)
+            if stream_drill is None:
+                asyncio.run_coroutine_threadsafe(self._broadcast({
+                    "type": "session.scenario_unsupported", "phase": "started",
+                    "source": "custom", "scenario_name": event.scenario_name or event.drill_type,
+                }), self._loop)
+            else:
+                self._handle_custom_lsl_scenario_started(timestamp, event)
 
         if self._active_custom_session is not None:
             if normalized.kind == EventKind.ROUND_START and not self._active_custom_session.is_active:
@@ -420,6 +426,11 @@ class VirTraScenarioOrchestrator:
         asyncio.run_coroutine_threadsafe(self._broadcast(msg), self._loop)
 
         if normalized.kind == EventKind.SCENARIO_STOP:
+            if self._active_custom_session is None:
+                asyncio.run_coroutine_threadsafe(self._broadcast({
+                    "type": "session.scenario_unsupported", "phase": "stopped",
+                    "source": "custom", "scenario_name": event.scenario_name or event.drill_type,
+                }), self._loop)
             self._handle_custom_lsl_scenario_stopped(timestamp, event)
         return "unrecognized" if stream_drill is None else None
 
@@ -475,6 +486,10 @@ class VirTraScenarioOrchestrator:
         self._registry.reload()
         drill_info = self._registry.resolve_custom_lsl_drill(event.drill_type)
         if drill_info is None:
+            asyncio.run_coroutine_threadsafe(self._broadcast({
+                "type": "session.scenario_unsupported", "phase": "started",
+                "source": "custom", "scenario_name": event.scenario_name or event.drill_type,
+            }), self._loop)
             return
         if self._active_drill is not None:
             return
@@ -483,6 +498,10 @@ class VirTraScenarioOrchestrator:
         TrackerClass = tracker_for(drill_info)
         if TrackerClass is None or not issubclass(TrackerClass, CustomLslSessionBase):
             print(f"[VirTraScenarioOrchestrator] No custom LSL tracker for task_type={task_type!r}")
+            asyncio.run_coroutine_threadsafe(self._broadcast({
+                "type": "session.scenario_unsupported", "phase": "started",
+                "source": "custom", "scenario_name": event.scenario_name or event.drill_type,
+            }), self._loop)
             return
 
         self._run_source = "custom"
@@ -722,12 +741,20 @@ class VirTraScenarioOrchestrator:
             return
         drill_info = self._registry.resolve_drill(scenario_name)
 
-        # Unregistered scenario — drop entirely, no session started
+        # Tell the UI this scenario has no adapter; its events remain live only.
         if drill_info is None:
+            asyncio.run_coroutine_threadsafe(self._broadcast({
+                "type": "session.scenario_unsupported", "phase": "started",
+                "source": "native", "scenario_name": scenario_name,
+            }), self._loop)
             return
 
         if tracker_for(drill_info) is None:
             print(f"[VirTraScenarioOrchestrator] Unsupported trial adapter: {drill_info.get('trial_adapter')!r}")
+            asyncio.run_coroutine_threadsafe(self._broadcast({
+                "type": "session.scenario_unsupported", "phase": "started",
+                "source": "native", "scenario_name": scenario_name,
+            }), self._loop)
             return
         self._run_source = "native"
 
@@ -846,6 +873,13 @@ class VirTraScenarioOrchestrator:
         # If no registered session was ever started, ignore the stop event
         if self._active_drill is None:
             print("[VirTraScenarioOrchestrator] Scenario Stopped received but no active registered session — ignoring")
+            scenario_name = (_parse_metadata_field(metadata_raw, "Scenario") or
+                             self._native_context.get("native_scenario_name", ""))
+            if scenario_name:
+                asyncio.run_coroutine_threadsafe(self._broadcast({
+                    "type": "session.scenario_unsupported", "phase": "stopped",
+                    "source": "native", "scenario_name": scenario_name,
+                }), self._loop)
             return
 
         scenario_name = _parse_metadata_field(metadata_raw, "Scenario") or self._active_scenario or ""

@@ -91,6 +91,10 @@ LabReview.StreamRouter = (function () {
         LabReview.EventBus.emit('scenario-stopped', msg);
         break;
 
+      case 'session.scenario_unsupported':
+        LabReview.EventBus.emit('scenario-unsupported', msg);
+        break;
+
       case 'session.context_updated':
         LabReview.EventBus.emit('scenario-context-updated', msg);
         break;

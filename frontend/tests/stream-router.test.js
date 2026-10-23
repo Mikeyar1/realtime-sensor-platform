@@ -40,4 +40,8 @@ receive({ type: 'streams.catalog', streams: [
 assert.equal(sent.some(message => message.type === 'streams.subscribe'), false);
 receive({ type: 'session.virtra_event', event_type: 'Shot Fired' });
 assert.equal(events.filter(event => event.name === 'virtra-event').length, 1);
+receive({ type: 'session.scenario_unsupported', phase: 'started',
+  scenario_name: 'Unknown Scenario', source: 'native' });
+assert.equal(events.find(event => event.name === 'scenario-unsupported').value.scenario_name,
+  'Unknown Scenario');
 console.log('Stream router event and subscription checks passed');

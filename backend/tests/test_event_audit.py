@@ -1,12 +1,13 @@
 """Append-only event evidence, links, and deterministic replay."""
 
 import asyncio
+import io
 import json
 import sqlite3
 import sys
 import tempfile
 import unittest
-from contextlib import closing
+from contextlib import closing, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,6 +38,52 @@ def native(name, scenario="PVT"):
 
 
 class EventAuditTests(unittest.TestCase):
+    def test_unrecognized_custom_scenario_is_live_only(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "audit.db")
+            database.init_db(path)
+            store = EventStore(path)
+            messages = []
+
+            async def send(message):
+                messages.append(message)
+
+            async def run():
+                coordinator = SessionLifecycleCoordinator(
+                    inlet_manager={}, broadcast_fn=send, send_fn=send,
+                    loop=asyncio.get_running_loop(), event_store=store)
+                for timestamp, name in [(1, "Scenario Started"),
+                                        (2, "Scenario Stopped")]:
+                    sample = custom(name)
+                    payload = json.loads(sample[3])
+                    payload.update(drill_type="unknown_drill",
+                                   scenario_name="Unmapped Custom")
+                    sample[3] = json.dumps(payload)
+                    coordinator.on_sample("virtra_lsl", "VirTra Events",
+                                          timestamp, sample)
+                    if timestamp == 1:
+                        coordinator.on_sample("virtra_lsl", "VirTra Events", 1.5,
+                                              ["Shot Fired", "", "", "{bad"])
+                await asyncio.sleep(0.05)
+                self.assertEqual([message["phase"] for message in messages
+                                  if message.get("type") == "session.scenario_unsupported"],
+                                 ["started", "stopped"])
+                self.assertFalse(any(message.get("type") == "session.unsupported_event"
+                                     for message in messages))
+                self.assertTrue(store.flush())
+                with closing(sqlite3.connect(path)) as conn:
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM assessment_runs")
+                                     .fetchone()[0], 0)
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM lsl_event_log")
+                                     .fetchone()[0], 0)
+            terminal = io.StringIO()
+            with redirect_stdout(terminal):
+                asyncio.run(run())
+            self.assertIn("[UnsupportedScenario] custom stream='virtra_lsl'",
+                          terminal.getvalue())
+            self.assertIn("raw=['Shot Fired', '', '', '{bad']", terminal.getvalue())
+            store.close()
+
     def test_session_raw_logs_can_be_queried_by_round(self):
         with tempfile.TemporaryDirectory() as folder:
             path = str(Path(folder) / "audit.db")
@@ -51,6 +98,7 @@ class EventAuditTests(unittest.TestCase):
                     inlet_manager={}, broadcast_fn=send, send_fn=send,
                     loop=asyncio.get_running_loop(), event_store=store)
                 ingest = coordinator.on_sample
+                ingest("Polar HR", "HR", 0.5, [71], source_id="heart")
                 ingest("V_300", "VirTraEvents", 1,
                        native("Scenario Started", "Fitts-PVT_Clay"))
                 ingest("Polar HR", "HR", 1.5, [72], source_id="heart")
@@ -180,6 +228,8 @@ class EventAuditTests(unittest.TestCase):
                            "target": {"target_id": "clay-1", "presentation_index": 1}}},
                            scenario_time=2.4),
                        outlet_uid="custom-uid")
+                ingest("virtra_lsl", "VirTra Events", 4.6,
+                       ["Shot Fired", "", "", "{bad"], outlet_uid="custom-uid")
                 ingest("virtra_lsl", "VirTra Events", 5,
                        custom("Round Completed", 1, scenario_time=3),
                        outlet_uid="custom-uid")
@@ -196,7 +246,23 @@ class EventAuditTests(unittest.TestCase):
                 ingest("V_300", "VirTraEvents", 10,
                        native("Scenario Started", "Unknown Scenario"),
                        outlet_uid="native-uid")
+                ingest("Polar HR", "HR", 10.5, [73], source_id="heart")
+                ingest("V_300", "VirTraEvents", 11,
+                       native("Shot Fired", "Unknown Scenario"),
+                       outlet_uid="native-uid")
+                ingest("V_300", "VirTraEvents", 12,
+                       native("Scenario Stopped", "Unknown Scenario"),
+                       outlet_uid="native-uid")
                 await asyncio.sleep(0.05)
+                self.assertTrue(any(msg.get("type") == "session.scenario_unsupported" and
+                                    msg.get("phase") == "started" and
+                                    msg.get("scenario_name") == "Unknown Scenario"
+                                    for msg in replies))
+                self.assertFalse(any(msg.get("type") == "session.scenario_unsupported" and
+                                     msg.get("scenario_name") == "Fitts-PVT_Clay"
+                                     for msg in replies))
+                self.assertFalse(any(msg.get("type") == "session.unsupported_event"
+                                     for msg in replies))
                 self.assertTrue(store.flush())
                 custom_rows = store.get_run_events(run_id)
                 self.assertEqual(len(custom_rows), 7)  # native context and backstop plus scored custom round
@@ -207,8 +273,8 @@ class EventAuditTests(unittest.TestCase):
                 scored_round = round_repository.get_run(run_id)["rounds"][0]
                 self.assertEqual(scored_round["metrics"]["hits"], 1)
                 all_rows = store.get_capture_events(store.capture_id)
-                self.assertEqual(len(all_rows), 11)
-                self.assertEqual(all_rows[7]["decode_status"], "malformed")
+                self.assertEqual(len(all_rows), 10)
+                self.assertEqual(all_rows[5]["decode_status"], "malformed")
                 self.assertIsNone(coordinator._orchestrator._active_drill)
                 with closing(sqlite3.connect(path)) as conn:
                     native_runs = conn.execute("""SELECT DISTINCT run_id FROM assessment_event_links
@@ -220,6 +286,8 @@ class EventAuditTests(unittest.TestCase):
                         ("native", "native-session", "complete"))
                     self.assertEqual(conn.execute("""SELECT COUNT(*) FROM v_session_signal_log
                         WHERE session_id = ?""", (native_run_id,)).fetchone()[0], 1)
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM lsl_signal_log")
+                                     .fetchone()[0], 1)
                 self.assertEqual(len(native_runs), 1)
                 native_rows = store.get_run_events(native_runs[0][0])
                 self.assertEqual(len(native_rows), 2)

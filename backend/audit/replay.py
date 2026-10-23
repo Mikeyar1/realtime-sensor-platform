@@ -35,8 +35,12 @@ def replay_capture(event_store, capture_id: str, on_sample, *, batch_size: int =
                     decoded.event_name != saved.get("event_name") or
                     decoded.payload != saved.get("payload")):
                 differences.append(row["id"])
-            on_sample(row["stream_name"], row["stream_type"],
-                      row["lsl_timestamp"], channels)
+            # Live ingestion never routes malformed source events to scoring.
+            # Some legacy decoders accept their envelopes permissively, so
+            # replay must preserve the audited routing decision.
+            if decoded.status == "decoded":
+                on_sample(row["stream_name"], row["stream_type"],
+                          row["lsl_timestamp"], channels)
             count += 1
         if len(rows) < batch_size:
             break

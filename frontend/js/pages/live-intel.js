@@ -53,6 +53,7 @@ LabReview.LiveIntelPage = (function () {
   let _sessionId = '';
   let _captureStatus = 'complete';
   let _scoringNotice = '';
+  let _unsupportedScenario = null;
 
   function _isRoundAssessment() {
     return _runSource === 'custom' &&
@@ -87,6 +88,7 @@ LabReview.LiveIntelPage = (function () {
     // VirTra scenario lifecycle
     LabReview.EventBus.on('scenario-started', _onScenarioStarted);
     LabReview.EventBus.on('scenario-stopped', _onScenarioStopped);
+    LabReview.EventBus.on('scenario-unsupported', _onScenarioUnsupported);
     LabReview.EventBus.on('scenario-context-updated', _onScenarioContextUpdated);
 
     // Raw VirTra events → AAR dashboard (event counting etc.)
@@ -210,6 +212,14 @@ LabReview.LiveIntelPage = (function () {
             </p>
           </div>
 
+          <div class="li-unsupported-notice" id="li-unsupported-notice"
+               role="status" style="display:none">
+            <strong>Unsupported Scenario</strong>
+            <span id="li-unsupported-name"></span>
+            <span>This drill is not saved or scored.</span>
+            <span id="li-unsupported-status"></span>
+          </div>
+
           <!-- STATE: CAPTURING / RESULTS — session ribbon + metric cards -->
           <div class="li-session-view" id="li-session-view" style="display:none">
 
@@ -294,7 +304,13 @@ LabReview.LiveIntelPage = (function () {
     const isResults = _state === 'RESULTS';
     const isActive = isCapturing || isSummarizing || isResults;
 
-    _toggleEl('li-idle-overlay', isIdle);
+    _toggleEl('li-idle-overlay', isIdle && !_unsupportedScenario);
+    _toggleEl('li-unsupported-notice', !!_unsupportedScenario);
+    const unsupportedName = document.getElementById('li-unsupported-name');
+    if (unsupportedName) unsupportedName.textContent = _unsupportedScenario?.name || '';
+    const unsupportedStatus = document.getElementById('li-unsupported-status');
+    if (unsupportedStatus) unsupportedStatus.textContent = _unsupportedScenario?.ended
+      ? 'Scenario ended.' : 'Scenario in progress.';
     _toggleEl('li-session-view', isActive);
     _toggleEl('li-results-banner', isResults || isSummarizing);
     _toggleEl('li-behavioral-section', !_isRoundAssessment());
@@ -382,11 +398,32 @@ LabReview.LiveIntelPage = (function () {
 
   // ── Scenario lifecycle ────────────────────────────────────────────────────
 
+  function _onScenarioUnsupported(payload) {
+    const name = String(payload.scenario_name || '').trim();
+    if (payload.phase === 'stopped') {
+      if (!_unsupportedScenario ||
+          _unsupportedScenario.source !== payload.source ||
+          _unsupportedScenario.name.toLowerCase() !== name.toLowerCase()) return;
+      _unsupportedScenario = { ..._unsupportedScenario, ended: true };
+      _scoringNotice = 'Unsupported Scenario';
+    } else {
+      if (_sessionId && (_state === 'CAPTURING' || _state === 'SUMMARIZING')) return;
+      _unsupportedScenario = { name: name || 'Unknown scenario', source: payload.source };
+      _scoringNotice = 'Unsupported Scenario';
+    }
+    _refreshStatusDot();
+    _applyStateToPage();
+  }
+
   function _onScenarioStarted(payload) {
     console.log(`[LiveIntel] scenario-started — state=${_state}`, payload);
 
     if (!['PVT', 'GNG', 'DISCRIMINATION', 'PVT_FITTS', 'COMPOSITE'].includes(payload.task_type) || !payload.drill_key) {
       console.warn('[LiveIntel] Ignoring unsupported drill', payload);
+      _onScenarioUnsupported({
+        phase: 'started', source: payload.source || 'native',
+        scenario_name: payload.scenario_name || payload.drill_key,
+      });
       return;
     }
 
@@ -396,6 +433,7 @@ LabReview.LiveIntelPage = (function () {
     _drillLabel = payload.drill_label || _drillKey;
     _taskType = payload.task_type;
     _runSource = payload.metrics_source || payload.source || 'native';
+    _unsupportedScenario = null;
     _scoringNotice = '';
     _refreshStatusDot();
     const sameRun = !!_sessionId && payload.session_id === _sessionId;
@@ -1370,6 +1408,7 @@ LabReview.LiveIntelPage = (function () {
     _scenarioPayload = null;
     _sessionId = '';
     _captureStatus = 'complete';
+    _unsupportedScenario = null;
     _scoringNotice = '';
     _activeDisplay?.reset?.();
     _activeDisplay = null;

@@ -17,6 +17,7 @@ run.save_remaining, with an end-of-run compatibility bridge):
 """
 
 import asyncio
+import re
 import sqlite3
 import threading
 import time
@@ -36,11 +37,14 @@ from api.message_types import (
     MSG_PERF_QUERY, MSG_PERF_RESULT, MSG_PERF_DELETE_SESSION, MSG_PERF_DELETE_ROUND,
     MSG_PERF_DELETE_PARTICIPANT, MSG_PERF_DELETE_RESULT,
 )
-from .virtra_scenario_orchestrator import VirTraScenarioOrchestrator
+from .virtra_scenario_orchestrator import VirTraScenarioOrchestrator, _parse_metadata_field
 from . import round_repository
 from audit.attribution import EventAttributor, _custom_round
+from assessments.events import EventKind, normalize_custom_event
 from event_decoders.source_event import decode_source_event
 from scenarios.registry import ScenarioRegistry
+from trial_models.registry import tracker_for
+from virtra_custom_lsl.session import CustomLslSessionBase
 
 
 def _db_get_participants() -> list[str]:
@@ -150,6 +154,7 @@ class SessionLifecycleCoordinator:
         self._ingest_lock = threading.RLock()
         self._recent_log_sessions: deque[tuple[str, float, float]] = deque(maxlen=8)
         self._log_start_by_run: dict[str, float] = {}
+        self._unsupported_live: dict[str, str] = {}
 
         # Live session state
         self._state:           str   = STATE_IDLE
@@ -514,6 +519,13 @@ class SessionLifecycleCoordinator:
         drill_state = self._orchestrator.get_active_drill_state()
         if drill_state:
             await self._send(websocket, drill_state)
+        with self._ingest_lock:
+            unsupported = list(self._unsupported_live.items())
+        for source, name in unsupported:
+            await self._send(websocket, {
+                "type": "session.scenario_unsupported", "phase": "started",
+                "source": source, "scenario_name": name,
+            })
 
     # ── Ingestion callbacks ───────────────────────────────────────────────────
 
@@ -539,13 +551,16 @@ class SessionLifecycleCoordinator:
                     session_id = next((run_id for run_id, start, end
                                        in reversed(self._recent_log_sessions)
                                        if start <= timestamp <= end), "")
-                recorded = self._event_store.append_signal(
-                    outlet_uid=outlet_uid, stream_name=stream_name,
-                    stream_type=stream_type, source_id=source_id,
-                    signal_config_id=spec["id"], lsl_timestamp=timestamp,
-                    channels=data, session_id=session_id)
-                if not recorded:
-                    return "dropped"
+                supported_active = bool(router._custom_session_id or router._session_id)
+                if (session_id or router._waiting_for_custom) and (
+                        supported_active or not self._unsupported_live):
+                    recorded = self._event_store.append_signal(
+                        outlet_uid=outlet_uid, stream_name=stream_name,
+                        stream_type=stream_type, source_id=source_id,
+                        signal_config_id=spec["id"], lsl_timestamp=timestamp,
+                        channels=data, session_id=session_id)
+                    if not recorded:
+                        return "dropped"
             return self._orchestrator.on_sample(
                 stream_name, stream_type, timestamp, data,
                 outlet_uid=outlet_uid, source_id=source_id)
@@ -553,13 +568,46 @@ class SessionLifecycleCoordinator:
     def _audit_and_route(self, stream_name, stream_type, timestamp, data,
                          source, outlet_uid, source_id):
         event = decode_source_event(source, data)
+        router = self._orchestrator
+        start = self._classify_scenario_start(event)
+        if start is not None:
+            supported, scenario_name = start
+            if supported:
+                self._unsupported_live.pop(source, None)
+            else:
+                self._unsupported_live[source] = scenario_name
+        matched_native = router._custom_context.get("context_match_status") in {
+            "matched_name", "matched_alias"}
+        persist = (start[0] if start is not None else
+                   bool((router._custom_session_id if source == "custom" else
+                         router._session_id or router._waiting_for_custom or
+                         (router._custom_session_id and matched_native)) and
+                        self._matches_active_scenario(event)))
+        unsupported_name = self._unsupported_live.get(source, "")
+        label = ("UnsupportedScenario" if not persist and unsupported_name else
+                 "ScenarioLSL" if persist else "LSL")
+        print(f"[{label}] {source} stream={stream_name!r} "
+              f"lsl_timestamp={timestamp} raw={data!r}", flush=True)
+        if not persist:
+            is_stop = event.event_name in {"Scenario Stopped", "Scenario Ended",
+                                           "Scenario Destroyed"}
+            outcome = router.on_sample(stream_name, stream_type, timestamp, data,
+                                       source_event=event, outlet_uid=outlet_uid,
+                                       source_id=source_id)
+            if is_stop:
+                if unsupported_name and event.status != "decoded":
+                    asyncio.run_coroutine_threadsafe(self._broadcast({
+                        "type": "session.scenario_unsupported", "phase": "stopped",
+                        "source": source, "scenario_name": unsupported_name,
+                    }), self._loop)
+                self._unsupported_live.pop(source, None)
+            return outcome
         event_id = self._event_store.append(
             outlet_uid=outlet_uid, stream_name=stream_name, stream_type=stream_type,
             source_id=source_id, lsl_timestamp=timestamp, channels=data,
             source_event=event)
         if event_id is None:
             return "dropped"  # never score an event without an audit identity
-        router = self._orchestrator
         active_id = (router._custom_session_id if source == "custom" else
                      router._session_id if router._active_drill is not None else "")
         if event.status != "decoded":
@@ -630,6 +678,61 @@ class SessionLifecycleCoordinator:
             self._event_store.mark_processing_error(exc)
             raise
         return outcome
+
+    def _classify_scenario_start(self, event) -> tuple[bool, str] | None:
+        if event.status != "decoded":
+            return None
+        router = self._orchestrator
+        if event.source == "native" and event.event_name == "Scenario Started":
+            native = event.decoded
+            name = _parse_metadata_field(native.metadata_raw, "Scenario") or ""
+            if not name:
+                match = re.search(r"Scenario[: ]+(.+)", native.description)
+                name = match.group(1).strip() if match else native.description.strip()
+            router._registry.reload()
+            policy = router._stream_config.drill_for_native_scenario(
+                name, include_disabled=True)
+            if policy and policy["metrics_source"] == "custom":
+                return True, name
+            if policy and policy["metrics_source"] != "native":
+                return False, name
+            drill = router._registry.resolve_drill(name)
+            return bool(drill and tracker_for(drill)), name
+        if event.source == "custom":
+            normalized = normalize_custom_event(event.decoded, 0, router._stream_config)
+            allowed_round = router._stream_config.custom_lifecycle.get(
+                "allow_round_start_without_scenario_start", False)
+            if normalized.kind not in {EventKind.SCENARIO_START, EventKind.ROUND_START} or (
+                    normalized.kind == EventKind.ROUND_START and not allowed_round):
+                return None
+            name = event.decoded.scenario_name or event.decoded.drill_type
+            router._registry.reload()
+            drill = router._registry.resolve_custom_lsl_drill(event.decoded.drill_type)
+            tracker = tracker_for(drill) if drill else None
+            return bool(tracker and issubclass(tracker, CustomLslSessionBase)), name
+        return None
+
+    def _matches_active_scenario(self, event) -> bool:
+        if event.status != "decoded":
+            return True  # Keep malformed samples within a supported window.
+        router = self._orchestrator
+        if event.source == "custom" and router._active_custom_drill:
+            active_type = router._active_custom_drill.get("custom_lsl_type", "")
+            incoming_type = event.decoded.drill_type
+            active_id = getattr(router._active_custom_session, "scenario_id", "")
+            incoming_id = event.decoded.scenario_id
+            return not ((active_type and incoming_type and
+                         active_type.casefold() != incoming_type.casefold()) or
+                        (active_id and incoming_id and active_id != incoming_id))
+        if event.source == "native":
+            incoming_name = _parse_metadata_field(event.decoded.metadata_raw,
+                                                  "Scenario") or ""
+            active_name = (router._active_scenario or router._waiting_for_custom or
+                           router._custom_context.get("native_scenario_name", ""))
+            return not (incoming_name and active_name and
+                        incoming_name.casefold().strip() !=
+                        active_name.casefold().strip())
+        return True
 
     def _finish_log(self, run_id: str, source: str, started_at: float,
                     ended_at: float, *, native_context: bool = False) -> None:
@@ -705,4 +808,6 @@ class SessionLifecycleCoordinator:
         elapsed = round(time.monotonic() - self._live_start_wall, 1) if self._live_start_wall else 0.0
         self._state = STATE_IDLE
         self._live_start_wall = 0.0
+        with self._ingest_lock:
+            self._unsupported_live.clear()
         print(f"[SessionLifecycleCoordinator] Live mode DEACTIVATED — session ran for {elapsed}s")
