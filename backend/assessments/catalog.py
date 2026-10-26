@@ -34,9 +34,6 @@ class CategoryDefinition:
 class DrillDefinition:
     id: str
     category_id: str
-    adapter: str
-    default_preset_id: str
-    default_settings: tuple[tuple[str, float | int], ...]
 
 
 def _metric(id: str, label: str, group: str, unit: str, description: str,
@@ -80,17 +77,5 @@ CATEGORIES = {
 }
 
 DRILLS = {
-    "fitts_pvt_clay": DrillDefinition(
-        "fitts_pvt_clay", "pvt_fitts", "virtra_custom_lsl", "default",
-        (("active_distance_meters", 10),
-         ("active_visibility_duration_seconds", 2),
-         ("active_spawn_interval_seconds", 2),
-         ("active_targets_per_round", 15),
-         ("active_concurrent_targets", 1)),
-    ),
+    "fitts_pvt_clay": DrillDefinition("fitts_pvt_clay", "pvt_fitts"),
 }
-
-
-def profile_for_drill(drill_key: str) -> AssessmentProfile | None:
-    drill = DRILLS.get(drill_key)
-    return CATEGORIES[drill.category_id].profile if drill else None

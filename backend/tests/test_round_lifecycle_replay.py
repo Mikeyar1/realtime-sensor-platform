@@ -149,6 +149,55 @@ class RoundLifecycleReplayTests(unittest.TestCase):
                 self.assertIsNotNone(router._active_custom_session)
             asyncio.run(run())
 
+    def test_same_capture_can_start_a_new_run_after_it_ends(self):
+        with tempfile.TemporaryDirectory() as folder:
+            database.init_db(str(Path(folder) / "run.db"))
+
+            async def run():
+                messages = []
+                router = self._orchestrator(messages)
+                first_id = None
+                second_id = None
+                for offset in (0, 100):
+                    router.on_sample("virtra_lsl", "VirTra Events", offset + 1,
+                                     custom("Scenario Started", 0, 0, "same-script-id"))
+                    run_id = router._custom_session_id
+                    if offset == 0:
+                        first_id = run_id
+                    else:
+                        second_id = run_id
+                    router.on_sample("virtra_lsl", "VirTra Events", offset + 2,
+                                     custom("Round Started", 1, 1, "same-script-id"))
+                    router.on_sample("second-outlet", "VirTra Events", offset + 2,
+                                     custom("Round Started", 1, 1, "same-script-id"))
+                    router.on_sample("virtra_lsl", "VirTra Events", offset + 3,
+                                     custom("Round Completed", 1, 2, "same-script-id"))
+                    router.on_sample("virtra_lsl", "VirTra Events", offset + 4,
+                                     custom("Scenario Ended", 1, 3, "same-script-id"))
+                await asyncio.sleep(0.05)
+                self.assertNotEqual(first_id, second_id)
+                self.assertEqual(round_repository.get_run(first_id)["status"], "ended")
+                self.assertEqual(round_repository.get_run(second_id)["status"], "ended")
+                self.assertEqual(len(round_repository.get_run(second_id)["rounds"]), 1)
+                self.assertEqual(sum(m.get("type") == "session.scenario_started"
+                                     for m in messages), 2)
+            asyncio.run(run())
+
+    def test_mirrored_custom_event_with_small_timestamp_skew_is_dropped(self):
+        from services.round_assessment_service import RoundAssessmentService
+
+        service = RoundAssessmentService()
+        raw = custom("Target Appeared", 1, 3, "script-1")
+        self.assertTrue(service.accepts(10, raw, scenario_id="script-1",
+                                        is_explicit_start=False,
+                                        drill_key="fitts_pvt_clay"))
+        self.assertFalse(service.accepts(10.005, raw, scenario_id="script-1",
+                                         is_explicit_start=False,
+                                         drill_key="fitts_pvt_clay"))
+        self.assertTrue(service.accepts(10.02, raw, scenario_id="script-1",
+                                        is_explicit_start=False,
+                                        drill_key="fitts_pvt_clay"))
+
 
 if __name__ == "__main__":
     unittest.main()

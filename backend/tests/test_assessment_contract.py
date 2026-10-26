@@ -10,7 +10,7 @@ from assessments.catalog import CATEGORIES, DRILLS, PVT_FITTS_V1
 from assessments.pvt_fitts import score, score_live, score_completed_run
 from assessments.events import EventKind, normalize_custom_event
 from services.virtra_stream_config import VirtraStreamConfig, _validate
-from virtra_custom_lsl.event_decoder import CustomLslEvent
+from event_decoders.custom_lsl import CustomLslEvent
 
 
 class AssessmentContractTests(unittest.TestCase):

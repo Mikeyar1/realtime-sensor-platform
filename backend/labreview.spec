@@ -44,9 +44,11 @@ a = Analysis(
         # Backend runtime config (editable by operator)
         (str(BACKEND_DIR / "config.toml"),               "."),
 
-        # Drill/scenario registry (editable — no rebuild needed when adding scenarios)
+        # Shared registry, stream policy, and bundled scenario contracts.
         (str(PROJECT_ROOT / "config" / "drill_registry.toml"), "config"),
         (str(PROJECT_ROOT / "config" / "virtra_streams.toml"), "config"),
+        (str(BACKEND_DIR / "scenarios"),                "scenarios"),
+        (str(BACKEND_DIR / "physiology" / "sources.toml"), "physiology"),
 
         # Frontend — served by the embedded HTTP server at runtime
         (str(PROJECT_ROOT / "frontend"),                 "frontend"),
@@ -57,19 +59,14 @@ a = Analysis(
 
     # Packages whose submodules are loaded dynamically (imported by string at runtime)
     hiddenimports=[
-        # cognitive_attributes are registered by name and instantiated dynamically
-        # Note: gng/ is currently an empty placeholder — add tracker/metrics here when implemented
-        "cognitive_attributes",
-        "cognitive_attributes.pvt",
-        "cognitive_attributes.pvt.tracker",
-        "cognitive_attributes.pvt.metrics",
-        "cognitive_attributes.gng",
-        "cognitive_attributes.multicolor_gng",
-        "cognitive_attributes.multicolor_gng.tracker",
-        "cognitive_attributes.multicolor_gng.metrics",
-        "cognitive_attributes.discrimination",
-        "cognitive_attributes.discrimination.tracker",
-        "cognitive_attributes.discrimination.metrics",
+        "trial_models.registry",
+        "trial_models.native_target_response",
+        "scenarios.behavioral_discrimination.native_trials",
+        "scenarios.fitts_gng_clay_colors.custom_trials",
+        "scenarios.fitts_pvt_clay.custom_trials",
+        "metrics.registry",
+        "metrics.catalog",
+        "cognitive_skills.catalog",
 
         # websockets uses some internals that can be missed
         "websockets.legacy",

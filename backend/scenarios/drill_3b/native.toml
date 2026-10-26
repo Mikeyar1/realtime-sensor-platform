@@ -1,0 +1,18 @@
+schema_version = 1
+
+[source]
+kind = "native"
+
+[drills.drill_3b]
+native_metadata_formats = ["pairs_v1"]
+native_scenarios = ["Drill 3B"]
+
+[drills.drill_3b.native_params]
+grace_window_ms = 200
+lapse_multiplier = 1.5
+threat_suffixes = ["_threat"]
+nonthreat_suffixes = ["_nonthreat"]
+
+[drills.drill_3b.native_targets]
+pvt_targets = ["neutral"]
+ignore_targets = ["Ivan", "fixation", "fixation (2)", "fixation (3)"]

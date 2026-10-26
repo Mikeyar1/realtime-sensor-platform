@@ -1,0 +1,21 @@
+schema_version = 1
+
+[scenario]
+id = "snake_drill"
+revision = 1
+
+[drills.snake_drill]
+metrics_source = "native"
+canonical_key = "pvt"
+label = "PVT"
+task_type = "PVT"
+default_component = "pvt"
+trial_adapter = "native_target_response"
+cognitive_skills = ["vigilance", "sustained_attention", "reaction_latency", "shooting_performance"]
+selected_metric_ids = ["pvt.total_trials", "pvt.rt_median_ms", "pvt.omission_rate_pct", "pvt.response_rate_pct", "pvt.accuracy_pct"]
+
+[drills.snake_drill.components.pvt]
+label = "PVT"
+phase_values = []
+metric_set = "PVT"
+scoring_status = "implemented"

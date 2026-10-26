@@ -123,17 +123,21 @@ class WebSocketServerTransport:
 
     # ── LSL sample routing ────────────────────────────────────────────────────
 
-    def on_sample(self, stream_name: str, stream_type: str, timestamp: float, data: list):
+    def on_sample(self, stream_name: str, stream_type: str, timestamp: float, data: list,
+                  *, outlet_uid: str = "", source_id: str = ""):
         """
         Called thread-safely from the LSL inlet worker thread.
         Notifies coordinator for real-time processing and fans out samples to subscribers.
         """
-        if self._loop is None:
-            return
-
         # Forward to coordinator first (for scenario & biosignal processing)
+        outcome = None
         if self._coordinator is not None:
-            self._coordinator.on_sample(stream_name, stream_type, timestamp, data)
+            outcome = self._coordinator.on_sample(
+                stream_name, stream_type, timestamp, data,
+                outlet_uid=outlet_uid, source_id=source_id)
+
+        if self._loop is None:
+            return outcome
 
         # Fan out immediately to subscribed clients
         elapsed_s = self._coordinator.get_elapsed_s(timestamp) if self._coordinator else None
@@ -141,6 +145,7 @@ class WebSocketServerTransport:
             asyncio.ensure_future,
             self._fanout_sample(stream_name, timestamp, elapsed_s, data),
         )
+        return outcome
 
     async def _fanout_sample(
         self,

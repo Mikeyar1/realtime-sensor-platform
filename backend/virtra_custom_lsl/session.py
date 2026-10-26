@@ -7,7 +7,7 @@ Every drill fed by this stream shares the same lifecycle shape:
     -> Scenario Stopped | Scenario Destroyed
 
 This base class owns that bookkeeping so drill-specific trackers
-(cognitive_attributes/<name>/tracker.py) only have to implement trial logic
+(scenarios/<name>/custom_trials.py) only have to implement trial logic
 by subclassing CustomLslSessionBase and overriding on_drill_event().
 
 NOTE ON SCENARIO STOPPED
@@ -23,7 +23,7 @@ from typing import Optional
 import re
 import uuid
 
-from .event_decoder import CustomLslEvent
+from event_decoders.custom_lsl import CustomLslEvent
 
 _LIFECYCLE_START = "Scenario Started"
 _LIFECYCLE_STOP  = ("Scenario Stopped", "Scenario Destroyed")
@@ -91,6 +91,10 @@ class CustomLslSessionBase:
         self._default_component: str = ""
         self._component_events: dict[str, str] = {}
         self._script_metric_events: set[str] = set()
+        self._drill_events: dict[str, set[str]] = {}
+        self._component_drill_events: dict[str, dict[str, set[str]]] = {}
+        self._drill_fields: dict[str, list[str]] = {}
+        self._component_drill_fields: dict[str, dict[str, list[str]]] = {}
         self._pending_preset = ""
         self._default_preset = ""
         self._default_settings: dict = {}
@@ -105,6 +109,22 @@ class CustomLslSessionBase:
         if lifecycle:
             self._lifecycle = {key: set(values) for key, values in lifecycle.items()}
         self._default_component = drill.get("default_component", "")
+        self._drill_events = {
+            key: {str(name).casefold() for name in names}
+            for key, names in drill.get("events", {}).items()
+        }
+        self._component_drill_events = {
+            component: {
+                key: {str(name).casefold() for name in names}
+                for key, names in spec.get("events", {}).items()
+            }
+            for component, spec in drill.get("components", {}).items()
+        }
+        self._drill_fields = {key: list(paths) for key, paths in drill.get("fields", {}).items()}
+        self._component_drill_fields = {
+            component: {key: list(paths) for key, paths in spec.get("fields", {}).items()}
+            for component, spec in drill.get("components", {}).items()
+        }
         self._default_preset = str(drill.get("default_preset_label") or "")
         self._default_settings = dict(drill.get("default_settings") or {})
         self._component_map = {
@@ -127,6 +147,31 @@ class CustomLslSessionBase:
             str(value).casefold()
             for spec in drill.get("components", {}).values()
             for value in spec.get("events", {}).get("script_metrics", []))
+
+    def event_matches(self, key: str, event_name: str, default: str) -> bool:
+        """Use the scenario's event names, or the legacy default if unconfigured."""
+        component_events = self._component_drill_events.get(self.component, {})
+        if key in component_events:
+            names = component_events[key]
+        elif key in self._drill_events:
+            names = self._drill_events[key]
+        else:
+            names = {default.casefold()}
+        return event_name.casefold() in names
+
+    def field_value(self, event: CustomLslEvent, key: str,
+                    fallback_paths: tuple[str, ...] = ()):
+        """Read the first present value through validated scenario field paths."""
+        local = self._component_drill_fields.get(self.component, {})
+        paths = local.get(key, self._drill_fields.get(key, fallback_paths))
+        payload = {"data": event.data}
+        for path in paths:
+            value = payload
+            for part in path.split("."):
+                value = value.get(part) if isinstance(value, dict) else None
+            if value is not None:
+                return value
+        return None
 
     def rounds_snapshot(self) -> list[dict]:
         rows = [asdict(record) for record in self.round_history]

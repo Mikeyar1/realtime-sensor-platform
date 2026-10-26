@@ -8,6 +8,6 @@ stream doesn't carry (e.g. go/no-go classification). See
 validate_data/VirTra_Custom_LSL_Stream_Spec.txt for the full schema.
 
 This package is infrastructure, not a cognitive attribute itself — individual
-drills (cognitive_attributes/<name>/) subclass CustomLslSessionBase to consume
+scenario adapters subclass CustomLslSessionBase to consume
 this stream with their own trial/metric logic.
 """

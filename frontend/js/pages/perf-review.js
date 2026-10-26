@@ -102,7 +102,9 @@ LabReview.PerfReviewPage = (function () {
     return profile ? LabReview.AAR.Standardized.specs[profile.metricSet].groups
       .flatMap(([, cards]) => cards.filter(card => card.scope !== 'run'))
       .map(card => ({ field: card.path, label: card.label, unit: card.unit,
-        lowerBetter: ['rt_', 'omission', 'miss'].some(prefix => card.path.startsWith(prefix)) }))
+        lowerBetter: card.path !== 'rt_count' &&
+          ['rt_', 'omission', 'miss'].some(prefix => card.path.startsWith(prefix)),
+        showDelta: card.path !== 'rt_count' }))
       : METRIC_DEFS[record.drill_key] || [];
   }
 
@@ -467,6 +469,9 @@ LabReview.PerfReviewPage = (function () {
       filtered = filtered.slice(filtered.length - depth);
     }
 
+    // Keep saved rounds from one assessment run together in the list and charts.
+    filtered = _historyGroups(filtered).flatMap(group =>
+      group.entries.map(entry => entry.record));
     _filteredSessions = filtered;
     _selectedSessionUuid = '';
     _selectedRoundKey = '';
@@ -476,6 +481,30 @@ LabReview.PerfReviewPage = (function () {
   }
 
   // ---- Session table ----------------------------------------------------------
+
+  function _historyGroups(records) {
+    const groups = [];
+    const roundsBySession = new Map();
+    const roundSessionIds = new Set(records.filter(record =>
+      record.result_scope === 'round' && record.session_uuid)
+      .map(record => record.session_uuid));
+    records.forEach(function (record, index) {
+      const sessionId = roundSessionIds.has(record.session_uuid) ? record.session_uuid : '';
+      let group = sessionId ? roundsBySession.get(sessionId) : null;
+      if (!group) {
+        group = { sessionId, entries: [] };
+        groups.push(group);
+        if (sessionId) roundsBySession.set(sessionId, group);
+      }
+      group.entries.push({ record, index });
+    });
+    groups.forEach(group => {
+      if (group.sessionId) group.entries.sort((a, b) =>
+        Number(a.record.result_scope === 'round') -
+        Number(b.record.result_scope === 'round'));
+    });
+    return groups;
+  }
 
   function _renderTable(sessions) {
     if (!_tableBody) return;
@@ -490,9 +519,12 @@ LabReview.PerfReviewPage = (function () {
       return;
     }
     if (emptyEl) emptyEl.style.display = 'none';
-    if (_tableCount) _tableCount.textContent = sessions.length + ' result' + (sessions.length !== 1 ? 's' : '');
+    const groups = _historyGroups(sessions);
+    if (_tableCount) _tableCount.textContent =
+      `${groups.length} session${groups.length === 1 ? '' : 's'} · ` +
+      `${sessions.length} result${sessions.length === 1 ? '' : 's'}`;
 
-    _tableBody.innerHTML = sessions.map(function (s, idx) {
+    function renderRow(s, idx) {
       const date = _sessionDateTime(s);
       const scenario = (s.scenario_name || 'Unnamed scenario') +
         (s.result_scope === 'round' ? ` · Round ${s.round_number}${s.round_attempt > 1 ? ` attempt ${s.round_attempt}` : ''}` : '');
@@ -507,6 +539,16 @@ LabReview.PerfReviewPage = (function () {
         '<span class="pr-session-row__stats"><span>Duration <strong>' + _esc(dur) + '</strong></span>' +
         '<span>' + _esc(_headlineLabel(s)) + ' <strong>' + _esc(metric) + '</strong></span></span></button>' +
         '<button type="button" class="pr-delete-session" data-delete-idx="' + idx + '" aria-label="Delete ' + _esc(scenario) + ' result from ' + _esc(date) + '">Delete</button></div>';
+    }
+    _tableBody.innerHTML = groups.map(function (group) {
+      const rows = group.entries.map(entry => renderRow(entry.record, entry.index)).join('');
+      if (!group.sessionId) return rows;
+      const count = group.entries.filter(entry => entry.record.result_scope === 'round').length;
+      return `<section class="pr-session-group" aria-label="Session ${_esc(group.sessionId)}">
+        <div class="pr-session-group__header">
+          <strong>Session · ${count} round${count === 1 ? '' : 's'} shown</strong>
+          <span>Session ID <code>${_esc(group.sessionId)}</code></span>
+        </div>${rows}</section>`;
     }).join('');
 
     _tableBody.querySelectorAll('.pr-session-select').forEach(function (button) {
@@ -597,6 +639,7 @@ LabReview.PerfReviewPage = (function () {
     }).join('');
     _chartScroll.innerHTML = `<div class="pr-detail"><button type="button" class="pr-detail-back" id="pr-detail-back">← All session trends</button>
       <h2>${_esc(session.scenario_name || 'Session')}</h2><p>${_esc(_sessionDateTime(session))} · ${_esc(session.capture_status || 'complete')} capture</p>
+      <p class="pr-detail-session-id">Session ID: <code>${_esc(session.session_uuid || _selectedSessionUuid)}</code></p>
       ${contextCards ? `<h3>VirTra context</h3><div class="pr-detail-grid">${contextCards}</div>` : ''}
       <h3>Behavioral results</h3><div class="pr-detail-grid">${metricCards || '<p>No scored metrics available.</p>'}</div>
       <h3>Physiological data</h3><div class="pr-detail-grid">${bioCards}</div>
@@ -666,6 +709,7 @@ LabReview.PerfReviewPage = (function () {
       <button type="button" class="pr-detail-back" id="pr-detail-back">← All round trends</button>
       <h2>${_esc(round.scenario_name || 'Round')} · Round ${_esc(round.round_number)}</h2>
       <p class="pr-detail-meta">${_esc(_sessionDateTime(round))} · Participant: ${_esc(round.participant_name || 'Unassigned')} · Preset: ${_esc(preset)}</p>
+      <p class="pr-detail-session-id">Session ID: <code>${_esc(round.run_id)}</code></p>
       ${settings ? `<section class="pr-detail-section"><h3>Preset settings</h3><div class="pr-detail-grid">${settings}</div></section>` : ''}
       ${_roundMetricSections(round)}
       <section class="pr-detail-section"><div class="pr-detail-section-heading"><h3>Physiological data</h3><span>${_esc(quality)}</span></div><div class="pr-detail-grid">${bioCards}</div></section></div>`;
@@ -878,6 +922,7 @@ LabReview.PerfReviewPage = (function () {
 
   function _buildMetricCard(def, values, sessions, isBio, cardIdx) {
     const card = document.createElement('div');
+    const trendKind = _trendKind(sessions);
     card.className = 'pr-metric-card';
     card.dataset.cardIdx = String(cardIdx);
     card.tabIndex = 0;
@@ -894,7 +939,7 @@ LabReview.PerfReviewPage = (function () {
 
     // Delta badge
     let deltaBadge = '';
-    if (!isBio && firstV !== null && lastV !== null && firstV !== lastV) {
+    if (!isBio && def.showDelta !== false && firstV !== null && lastV !== null && firstV !== lastV) {
       const pct = ((lastV - firstV) / (Math.abs(firstV) || 1)) * 100;
       const isImp = def.lowerBetter ? pct < 0 : pct > 0;
       const cls   = Math.abs(pct) < 0.5 ? 'flat' : (isImp ? 'up' : 'down');
@@ -921,9 +966,9 @@ LabReview.PerfReviewPage = (function () {
         '</div>' +
       '</div>' +
       '<div class="pr-sparkline-wrap">' +
-        '<svg class="pr-sparkline" id="pr-sparkline-' + cardIdx + '" role="img" aria-label="' + _esc(def.label) + ' by session, oldest to newest"></svg>' +
+        '<svg class="pr-sparkline" id="pr-sparkline-' + cardIdx + '" role="img" aria-label="' + _esc(def.label) + (trendKind === 'session' ? ' by session, oldest to newest' : ' by ' + trendKind + ', grouped by session') + '"></svg>' +
       '</div>' +
-      '<div class="pr-metric-card__selection" aria-live="polite">Select a session to see its value</div>' +
+      '<div class="pr-metric-card__selection" aria-live="polite">Select a ' + trendKind + ' to see its value</div>' +
       '<div class="pr-metric-card__tooltip" aria-hidden="true"></div>';
 
     return card;
@@ -984,7 +1029,10 @@ LabReview.PerfReviewPage = (function () {
         .textContent = String(i + 1);
     });
     el('text', { x: PADL + plotW / 2, y: H - 3, 'text-anchor': 'middle', 'font-size': '10', fill: 'var(--text-muted)' }, svg)
-      .textContent = 'Session (oldest to newest)';
+      .textContent = _trendKind(sessions) === 'session'
+        ? 'Session (oldest to newest)'
+        : _trendKind(sessions) === 'round' ? 'Rounds grouped by session'
+          : 'Results grouped by session';
 
     // Polyline segments (handles null gaps)
     const lineColor = isBio ? 'var(--accent-teal)' : 'var(--accent-blue)';
@@ -1014,7 +1062,8 @@ LabReview.PerfReviewPage = (function () {
       const dot = el('circle', { cx, cy, r: '3.5', fill: lineColor,
         stroke: 'var(--bg-surface)', 'stroke-width': '1.5',
         'data-idx': i, class: 'pr-dot', style: 'cursor:pointer' }, svg);
-      el('title', {}, dot).textContent = _sessionDateTime(sessions[i]) + ': ' + _fmtVal(v, def.unit);
+      el('title', {}, dot).textContent = _historyPointLabel(sessions[i], i) + ' · ' +
+        _sessionDateTime(sessions[i]) + ': ' + _fmtVal(v, def.unit);
     });
 
     // Marker line (vertical)
@@ -1056,7 +1105,8 @@ LabReview.PerfReviewPage = (function () {
       const tooltip = card.querySelector('.pr-metric-card__tooltip');
       if (!selection || !tooltip) return;
       if (!selected) {
-        selection.textContent = 'Select a session to see its value';
+        selection.textContent = 'Select a ' + _trendKind(card._chartSessions) +
+          ' to see its value';
         tooltip.textContent = '';
         card.classList.remove('pr-metric-card--selected');
         return;
@@ -1064,10 +1114,26 @@ LabReview.PerfReviewPage = (function () {
       const value = card._chartValues[idx];
       const number = value === null || !isFinite(value) ? 'No value recorded' : _fmtVal(value, card._chartDef.unit);
       const date = _sessionDateTime(card._chartSessions[idx]);
-      selection.textContent = 'Session ' + (idx + 1) + ': ' + number;
-      tooltip.textContent = card._chartDef.label + ' · ' + date + ' · ' + number;
+      const record = card._chartSessions[idx];
+      selection.textContent = (record.result_scope === 'round'
+        ? `Round ${record.round_number} · Session ${String(record.session_uuid || '').slice(0, 8)}`
+        : `Session ${idx + 1}`) + ': ' + number;
+      tooltip.textContent = card._chartDef.label + ' · ' +
+        _historyPointLabel(record, idx) + ' · ' + date + ' · ' + number;
       card.classList.add('pr-metric-card--selected');
     });
+  }
+
+  function _historyPointLabel(record, index) {
+    return record.result_scope === 'round'
+      ? `Round ${record.round_number}${record.round_attempt > 1 ? ` attempt ${record.round_attempt}` : ''} · Session ${record.session_uuid || 'unknown'}`
+      : `Session ${index + 1}`;
+  }
+
+  function _trendKind(sessions) {
+    if (sessions.every(record => record.result_scope === 'round')) return 'round';
+    if (sessions.some(record => record.result_scope === 'round')) return 'result';
+    return 'session';
   }
 
   function _fmtAxisTick(value) {

@@ -1,0 +1,8 @@
+schema_version = 1
+
+[source]
+kind = "native"
+
+[drills.basepvt_fitts_gng_clay]
+native_metadata_formats = ["pairs_v1"]
+native_scenarios = ["base PVT Fitts - GNG clay"]

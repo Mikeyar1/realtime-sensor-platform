@@ -11,11 +11,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cognitive_attributes.multicolor_gng.tracker import MulticolorGngTracker
+from scenarios.fitts_gng_clay_colors.custom_trials import FittsGngClayColorsTracker
 from services import database
 from services.virtra_stream_config import VirtraStreamConfig, _upgrade_v1, _validate
 from services.virtra_scenario_orchestrator import VirTraScenarioOrchestrator
-from virtra_custom_lsl.event_decoder import CustomLslEvent, decode_custom_lsl_sample
+from event_decoders.custom_lsl import CustomLslEvent, decode_custom_lsl_sample
 from virtra_custom_lsl.session import CustomLslSessionBase
 
 
@@ -24,7 +24,7 @@ class CaptureSession(CustomLslSessionBase):
         pass
 
 
-class QuietGngTracker(MulticolorGngTracker):
+class QuietGngTracker(FittsGngClayColorsTracker):
     def _broadcast_update(self, trial):
         pass
 
@@ -53,7 +53,10 @@ class CustomLslRoundsTest(unittest.TestCase):
         _validate(migrated)
         self.assertNotIn("source_selection", migrated)
         self.assertEqual(migrated["drills"]["pvt_fitts"]["metrics_source"], "native")
-        self.assertEqual(len(migrated["drills"]["pvt_fitts"]["native_scenarios"]), 2)
+        self.assertEqual(migrated["drills"]["pvt_fitts"]["native_scenarios"],
+                         ["LVL1_PVT_FITTS_ASSESSMENT"])
+        self.assertEqual(migrated["drills"]["basepvt_fitts_clay"]["native_scenarios"],
+                         ["basePVT_Fitts_Clay"])
 
     def test_pvt_fitts_requires_real_custom_contract_before_source_flip(self):
         config = VirtraStreamConfig()
@@ -64,10 +67,7 @@ class CustomLslRoundsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             candidate = Path(folder) / "virtra_streams.toml"
             contents = config.path.read_text(encoding="utf-8")
-            contents = contents.replace(
-                '[drills.pvt_fitts]\nmetrics_source = "native"',
-                '[drills.pvt_fitts]\nmetrics_source = "custom"',
-            )
+            contents += '\n[drills.basepvt_fitts_clay]\nmetrics_source = "custom"\n'
             self.assertNotEqual(contents, config.path.read_text(encoding="utf-8"))
             candidate.write_text(contents, encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "before its components are implemented"):

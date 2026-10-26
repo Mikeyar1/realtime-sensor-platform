@@ -1,0 +1,34 @@
+schema_version = 1
+
+[[sources]]
+id = "heart_rate"
+signal = "hr"
+decoder = "numeric_channels"
+types = ["hr", "heart rate", "heartrate"]
+name_suffixes = ["hr", "heartrate"]
+channels = [0]
+units = ["bpm"]
+minimums = [30]
+maximums = [250]
+
+[[sources]]
+id = "pulse_interval"
+signal = "ppi"
+decoder = "numeric_channels"
+types = ["ppi", "ppinterval", "rrinterval", "ibi"]
+name_suffixes = ["ppi", "ppinterval", "rrinterval", "ibi"]
+channels = [1]
+units = ["ms"]
+minimums = [200]
+maximums = [2500]
+
+[[sources]]
+id = "neon_pupil"
+signal = "gaze"
+decoder = "numeric_channels"
+types = ["neongaze"]
+name_contains = ["neongaze", "gazeneon", "pupilgaze", "gazepupil"]
+channels = [2, 9]
+units = ["mm", "mm"]
+minimums = [0, 0]
+maximums = [15, 15]

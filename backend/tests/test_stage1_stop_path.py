@@ -17,7 +17,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from services.virtra_scenario_orchestrator import VirTraScenarioOrchestrator  # noqa: E402
-from virtra_custom_lsl.event_decoder import decode_custom_lsl_sample  # noqa: E402
+from event_decoders.custom_lsl import decode_custom_lsl_sample  # noqa: E402
 from virtra_custom_lsl.session import _preset_label  # noqa: E402
 
 

@@ -1,0 +1,34 @@
+schema_version = 1
+
+[source]
+kind = "custom"
+
+[drills.basepvt_fitts_clay]
+custom_drill_types = ["pvt_fitts"] # replace/add the actual script drill_type at the lab
+
+[drills.basepvt_fitts_clay.events]
+trial_start = []
+trial_end = []
+script_metrics = ["Metrics Updated"]
+
+[drills.basepvt_fitts_clay.fields]
+target_id = []
+trial_index = []
+reaction_time_seconds = []
+script_metrics = []
+
+[drills.basepvt_fitts_clay.components.fitts.events]
+start = []                        # enter the event name that begins Fitts
+component_start = []              # event name/code that announces Fitts
+trial_start = []                  # events needed for Fitts scoring
+trial_end = []
+script_metrics = []
+
+[drills.basepvt_fitts_clay.components.fitts.fields]
+target_id = []
+trial_index = []
+movement_time_seconds = []
+target_width_meters = []
+target_distance_meters = []
+endpoint_error_meters = []
+script_metrics = []

@@ -34,12 +34,8 @@ MSG_API_ERROR            = "api.error"
 MSG_SCENARIO_STARTED     = "session.scenario_started"
 MSG_SCENARIO_STOPPED     = "session.scenario_stopped"
 
-# Post-scenario metric computation result (broadcast by AnalysisTrigger)
+# Post-scenario metric computation result
 MSG_METRICS_READY        = "session.metrics_ready"
-
-# Operator-driven session record save flow
-MSG_SESSION_SAVE_RECORD    = "session.save_record"
-MSG_SESSION_RECORD_SAVED   = "session.record_saved"
 
 # Database — participant management & session confirm/discard (Client → Server)
 MSG_DB_GET_PARTICIPANTS    = "db.get_participants"

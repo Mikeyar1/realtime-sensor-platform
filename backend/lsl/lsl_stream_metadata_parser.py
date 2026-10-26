@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 def parse_lsl_stream_metadata(info) -> dict:
     """Parse an LSL StreamInfo object into a structured Python dictionary."""
     return {
+        "outlet_uid":     info.uid(),
         "name":           info.name(),
         "stream_type":    info.type(),
         "channel_count":  info.channel_count(),
@@ -19,10 +20,6 @@ def parse_lsl_stream_metadata(info) -> dict:
         "source_id":      info.source_id(),
         "channels":       _parse_channels(info),
     }
-
-
-# Alias for backward compatibility
-parse_stream_info = parse_lsl_stream_metadata
 
 
 def _parse_channels(info) -> list[dict]:

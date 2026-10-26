@@ -91,6 +91,10 @@ LabReview.StreamRouter = (function () {
         LabReview.EventBus.emit('scenario-stopped', msg);
         break;
 
+      case 'session.scenario_unsupported':
+        LabReview.EventBus.emit('scenario-unsupported', msg);
+        break;
+
       case 'session.context_updated':
         LabReview.EventBus.emit('scenario-context-updated', msg);
         break;
@@ -125,6 +129,11 @@ LabReview.StreamRouter = (function () {
         LabReview.EventBus.emit('assessment-round-projection', msg);
         break;
 
+      case 'assessment.catalog':
+        LabReview.AssessmentCatalog = msg;
+        LabReview.EventBus.emit('assessment-catalog', msg);
+        break;
+
       case 'assessment.command_result':
         LabReview.EventBus.emit('assessment-command-result', msg);
         break;
@@ -142,15 +151,9 @@ LabReview.StreamRouter = (function () {
         // Speech has no active frontend view.
         break;
 
-      // ── AAR: computed metrics from Analysis (fired after scenario ends) ───
-      // Backend sends this after Analysis has computed all drill metrics.
+      // AAR metrics computed after the scenario ends.
       case 'session.metrics_ready':
         LabReview.EventBus.emit('metrics-ready', msg);
-        break;
-
-      // ── Session record saved (operator clicked Save) ────────────────────
-      case 'session.record_saved':
-        LabReview.EventBus.emit('record-saved', msg);
         break;
 
       // ── PVT real-time trial update → unified trial-update event ─────────────────

@@ -1,0 +1,24 @@
+schema_version = 1
+
+[scenario]
+id = "basepvt_fitts_gng_clay"
+revision = 1
+
+[drills.basepvt_fitts_gng_clay]
+metrics_source = "disabled"
+canonical_key = "pvt_fitts_gng"
+label = "PVT / Go-No-Go"
+task_type = "COMPOSITE"
+default_component = "pvt"
+
+[drills.basepvt_fitts_gng_clay.components.pvt]
+label = "PVT"
+phase_values = ["pvt"]
+metric_set = "PVT"
+scoring_status = "pending_adapter"
+
+[drills.basepvt_fitts_gng_clay.components.gng]
+label = "Go/No-Go"
+phase_values = ["gng"]
+metric_set = "GNG"
+scoring_status = "pending_adapter"
