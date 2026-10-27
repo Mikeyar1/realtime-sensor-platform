@@ -23,6 +23,7 @@ wheels/
 
 # Session/data 
 data/
+/database/labreview.db*
 liveSessions
 validate_data/
 
