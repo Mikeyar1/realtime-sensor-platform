@@ -10,160 +10,63 @@ During a training scenario, LabReview connects to hardware streams over [Lab Str
 
 When the scenario stops, either from VirTra or the dashboard's Stop button, summary metrics are computed locally and shown in the after-action review (AAR) panel. Native sessions with valid trials are auto-saved; custom assessment rounds can be assigned to participants and saved individually.
 
-## Supported scored drills
+## What you can do
 
-| Drill | Input | Primary construct |
-| --- | --- | --- |
-| PVT | Registered native VirTra scenarios | Sustained attention / vigilance |
-| Fitts-PVT_Clay | `fitts_pvt` / `fitts_pvt_clay` custom VirTra LSL | PVT/Fitts metrics per round, with recorded preset and difficulty settings |
-| Go/No-Go | `multicolor_gng` custom VirTra LSL stream | Response inhibition / inhibitory control |
-| Behavioral Discrimination | Registered native VirTra scenarios | Perceptual / decision discrimination |
+- Watch connected streams and live performance as a simulation runs.
+- Review trial outcomes and rolling physiological measures in one dashboard.
+- Inspect a session summary after the scenario ends.
+- Save results with participant information and revisit them in session history.
 
-Unknown scenarios and former Marksmanship scenarios do not start a scored session. The frontend receives structured events and metrics from the backend; it does not subscribe to raw VirTra samples. Live and saved custom rounds with the same assessment profile share metric definitions and settings labels; see [the current metric reference](METRICS.md).
+## How it works
 
----
+1. The backend discovers available LSL streams from VirTra and connected sensors.
+2. Incoming simulator events are decoded and matched to a configured scenario. The selected trial tracker and physiology services turn samples into structured observations.
+3. Metric calculations update the live dashboard through a WebSocket connection. The browser displays results and sends operator actions; scoring stays in the backend.
+4. At the end of a scenario, the backend produces an after-action summary and stores session or round results in a local SQLite database for later review.
 
-## Requirements
+## Architecture
 
-- Python ≥ 3.14
-- [`uv`](https://github.com/astral-sh/uv) for backend dependency management
-- A static file server for the frontend (or any browser opened directly on `frontend/index.html`)
-- LSL-compatible hardware or a simulated LSL stream for testing
+```mermaid
+flowchart LR
+    A[VirTra and sensor streams] -->|LSL| B[Stream ingestion]
+    B --> C[Event decoding and session coordination]
+    C --> D[Trial tracking and physiology]
+    D --> E[Metrics and session results]
+    E --> F[(SQLite history)]
+    C --> G[WebSocket transport]
+    E --> G
+    G <--> H[Browser dashboard]
+```
 
-## Getting started
+| Area | Responsibility |
+| --- | --- |
+| `backend/lsl/` and `backend/event_decoders/` | Discover streams and turn native or custom samples into usable events. |
+| `backend/services/` and `backend/scenarios/` | Manage the session lifecycle and select scenario behavior from configuration. |
+| `backend/trial_models/`, `backend/physiology/`, and `backend/metrics/` | Track responses and sensor observations, then compute live and final measures. |
+| `backend/transport/` and `backend/api/` | Send structured updates and handle dashboard commands over WebSocket. |
+| `backend/services/database.py`, `backend/services/round_repository.py`, and `backend/audit/` | Persist results and event history locally. |
+| `frontend/` | Serve the live view, after-action review, and session history as a static browser app. |
 
-### 1. Backend
+`backend/main.py` starts the backend services and serves the frontend. The frontend needs no separate build step.
+
+## Run locally
+
+You need Python 3.14 or newer and [`uv`](https://docs.astral.sh/uv/). Live monitoring also needs VirTra or other LSL-compatible streams available on the network.
+
+From the repository root:
 
 ```bash
 cd backend
 uv run python main.py
 ```
 
-The server starts on `ws://0.0.0.0:8500` by default. Edit `backend/config.toml` to change the host, port, LSL discovery interval, or session data directory.
+The backend serves the dashboard at [http://localhost:3000](http://localhost:3000) and opens it in your browser by default. Its WebSocket server listens on port `8500`. You can open the dashboard manually if browser launch is disabled. Stop the process with Ctrl+C.
 
-### 2. Frontend
+## Configuration and local data
 
-Serve the `frontend/` directory with any static file server:
+- `backend/config.toml` sets the server ports, LSL polling behavior, database path, and browser launch option.
+- `config/virtra_streams.toml` identifies native and custom VirTra streams and their shared event fields.
+- `backend/scenarios/*/scenario.toml` and related scenario files define how recognized scenarios are tracked and scored.
+- `database/labreview.db` is the default SQLite store for saved sessions, rounds, and event history.
 
-```bash
-cd frontend
-python -m http.server 3000
-```
-
-Then open `http://localhost:3000` in a browser. The frontend connects to the backend WebSocket automatically on load.
-
----
-
-## Configuration
-
-### `backend/config.toml`
-
-Controls backend runtime behavior — server host/port, LSL polling intervals, and where session records are written. All paths are relative to `backend/`.
-
-```toml
-[server]
-host = "0.0.0.0"
-port = 8500
-
-[lsl]
-discovery_interval_seconds = 0.5
-pull_timeout_seconds = 1.0
-
-[session_data]
-session_data_directory = "../data/SessionData"
-```
-
-### `config/drill_registry.toml`
-
-Defines the implemented cognitive trackers, target classification, and trial timing parameters. Scenario aliases listed in `config/virtra_streams.toml` take precedence; unlisted legacy aliases here still work.
-
-Each entry specifies:
-- Which tracker to use
-- Which VirTra scenario names trigger it (matched against `Scenario Started` events)
-- Target classification for drills
-- Timing parameters (e.g. `late_shot_window_ms`, `min_rt_ms`)
-
-To add a new scenario alias, use `config/virtra_streams.toml`. To add a new cognitive attribute, see the section below.
-
-### `config/virtra_streams.toml`
-
-Defines native and custom VirTra stream identity, drill aliases, each drill's `metrics_source`, lifecycle event names, round policy, payload paths, and component names. `Fitts-PVT_Clay` selects `custom` and recognizes the observed `fitts_pvt` drill type as well as `fitts_pvt_clay`; its rounds use the existing PVT metric names and formulas. Change `[drills.fitts_pvt_clay].metrics_source` to `"native"` only for native PVT comparison testing, then restart LabReview. The other two PVT/Fitts aliases retain native PVT scoring.
-
-For a new custom drill, fill in `custom_drill_types`, component `phase_values`, event names, and payload paths. Select `metrics_source = "custom"` only after a matching Python tracker and metric contract are implemented; startup rejects unfinished component definitions. In a source checkout, edit `config/virtra_streams.toml`; an installed build reads the operator copy at `%APPDATA%\LabReview\config\virtra_streams.toml` when present. Older version 1 operator copies are converted in memory, with the timed Auto policy removed; update the file to version 2 before editing `metrics_source`. Stream identity changes need an app restart. Drill aliases reload at scenario start.
-
-The Live view starts a supported drill as soon as its configured scoring stream emits a start event. Native recognition accepts stream name `V_300` or type `VirTraEvents`; custom recognition accepts type `VirTra Events` (the usual name is `virtra_lsl`). LabReview continues reading `V_300` for scenario, simulator, and weapon context while custom events supply metrics. The session title shows the scenario name, with a separate **Metrics: Native/Custom** label. A missing selected scoring stream does not trigger a timed fallback.
-
-For `Fitts-PVT_Clay`, the emitted preset label is shown on each round and saved with that round. Completed rounds require a participant name at confirmation. Longitudinal review queries completed rounds by participant and scenario, with an optional preset-label filter. An unreported preset remains unreported; LabReview does not assign a preset from numeric settings.
-
-A round appears when the custom `Round Started` event follows the fixation target hit. `Round Completed` collapses it into previous rounds. Only after a completed round does the live view show **Waiting for next round**; a new active round appears on the next `Round Started`. Active, expanded completed, and final results share the same PVT cards. At scenario end, **Grand Total / Average** pools trials from completed rounds, sums their active trial windows for Session Duration, and excludes inter-round waiting time. For scoring, a fired shot with exactly one visible target is assigned to that presentation. A timeout after an assigned shot is a PVT miss, while a timeout without a shot is an omission. When concurrent targets make shot attribution uncertain, affected PVT rates remain unavailable rather than treating the timeout as an omission. Those partial rounds remain in detail but are excluded from trends. Native and custom records retain their source tags for longitudinal comparison.
-
----
-
-## How a session works
-
-1. Operator opens the dashboard and clicks **Start** (or a VirTra scenario fires and triggers auto-activation)
-2. The backend detects `Scenario Started` from the VirTra LSL stream, looks up the drill in the registry, and begins trial tracking
-3. VirTra events (Target Activated, Shot Hit, Target Deactivated, etc.) arrive and are processed trial-by-trial; each completed trial broadcasts an update to the frontend in real time
-4. Physiological data (HR, HRV, pupil diameter) is monitored in a rolling window and broadcast periodically alongside trial data
-5. When `Scenario Stopped` fires or the operator clicks **Stop**, the backend finalizes the drill, computes summary metrics, and auto-saves sessions with valid trials to the local database
-6. The operator confirms or corrects the participant name, or discards the session
-
----
-
-## WebSocket protocol
-
-All messages are JSON with a `type` field. The frontend sends:
-
-| Message | Purpose |
-|---|---|
-| `live.activate` | Enter live monitoring mode |
-| `live.deactivate` | Exit live mode |
-| `streams.get_catalog` | Request list of active LSL streams |
-| `system.get_state` | Request current session state |
-
-The backend sends:
-
-| Message | When |
-|---|---|
-| `session.state` | On connect, mode change |
-| `streams.catalog` | After catalog request or when streams change |
-| `stream.sample` | Each LSL sample for subscribed streams |
-| `session.scenario_started` | VirTra scenario begins |
-| `session.trial_update` | Each completed PVT, Go/No-Go, or Discrimination trial |
-| `session.biosignal_update` | Rolling HR/HRV/pupil stats |
-| `session.virtra_event` | Raw VirTra event for the event log |
-| `session.scenario_stopped` | VirTra scenario ends |
-| `session.metrics_ready` | Post-scenario summary metrics |
-
-Message type constants are defined in `backend/api/message_types.py` (Python) and mirrored in `backend/api/message_types.js` (JavaScript). Keep them in sync when adding new message types.
-
----
-
-## Adding a new cognitive attribute
-
-1. Create `backend/cognitive_attributes/<name>/tracker.py` — implement `reset(params, targets)`, `on_virtra_event(event_type, timestamp, metadata)`, `get_completed_trials()`, and `get_session_record(...)`
-2. Create `backend/cognitive_attributes/<name>/metrics.py` — implement `compute_live_metrics(trials) -> dict`
-3. Add an entry to `ATTRIBUTE_REGISTRY` in `backend/cognitive_attributes/__init__.py`
-4. Add a `[cognitive_attributes.<name>]` section to `config/drill_registry.toml` with tracker parameters, and add its scenario aliases and components to `config/virtra_streams.toml`
-5. Add an explicit task-type mapping and metric-card specification in the frontend AAR files
-
-The registry and AAR reject unsupported task types. Add a new type only when its tracker, metric contract, and UI are ready together.
-
----
-
-## LSL streams
-
-LabReview auto-discovers and subscribes to any LSL stream on the network. Streams known to the system:
-
-| Type | Source | Notes |
-|---|---|---|
-| `HR`, `ECG`, `PPI`, `PPG`, `ACC`, `GYRO` | Polar H10 | HR/PPI used for HRV computation |
-| `Gaze`, `eye_events`, `IMU` | Pupil Labs Neon | Gaze batched at 50 ms intervals |
-| `VirTraEvents` | VirTra simulator | Drives scenario lifecycle and trial tracking |
-| `speech_transcription` | Microphone / Whisper | Ingested by the backend; no active frontend view |
-
-Missing hardware produces no errors — streams that aren't present are simply absent from the catalog. The frontend displays the catalog and scored messages; raw stream subscriptions remain in the backend.
-
-To reuse the Fitts-PVT custom assessment for another VirTra scenario with the same event payloads, add its scenario name to `native_scenarios` and its script `drill_type` (if different) to `custom_drill_types` in [`config/virtra_streams.toml`](config/virtra_streams.toml). Keep `assessment_profile = "pvt_fitts_core"`; the live and longitudinal views then use the existing round UI without frontend changes.
-
-For reproducible VirTra sessions, use the [raw LSL capture and replay tool](VIRTRA_LSL_CAPTURE.md). It records the original channels from both native and custom event streams, then republishes them for home testing. Console logs and scored session records do not contain the complete wire samples.
+The browser reads results from the backend; it does not calculate scores itself.
